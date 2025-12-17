@@ -1,0 +1,41 @@
+[project]
+name = "dispatchbox"
+version = "0.1.0"
+description = "Outbox pattern worker for PostgreSQL"
+requires-python = ">=3.8"
+dependencies = [
+    "psycopg2-binary>=2.9.0",
+    "loguru>=0.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "faker>=20.0.0",
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+dispatchbox = "dispatchbox.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "faker>=20.0.0",
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+    "pytest-cov>=4.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+pythonpath = ["src"]
+
