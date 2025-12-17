@@ -84,6 +84,14 @@ class OutboxRepository:
         WHERE id = %s AND status = 'dead';
     """
 
+    RETRY_DEAD_EVENTS_BATCH_SQL = """
+        UPDATE outbox_event
+        SET status = 'pending',
+            attempts = 0,
+            next_run_at = now()
+        WHERE id = ANY(%s) AND status = 'dead';
+    """
+
     def __init__(
         self,
         dsn: str,
@@ -439,19 +447,10 @@ class OutboxRepository:
 
         self._check_connection()
         
-        # Build SQL with IN clause
-        placeholders = ','.join(['%s'] * len(event_ids))
-        sql = f"""
-            UPDATE outbox_event
-            SET status = 'pending',
-                attempts = 0,
-                next_run_at = now()
-            WHERE id IN ({placeholders}) AND status = 'dead';
-        """
-        
         with self.conn.cursor() as cur:
             self._set_query_timeout(cur)
-            cur.execute(sql, tuple(event_ids))
+            # Use ANY(%s) with array parameter for better performance
+            cur.execute(self.RETRY_DEAD_EVENTS_BATCH_SQL, (event_ids,))
             self.conn.commit()
             return cur.rowcount
 

@@ -239,13 +239,15 @@ def test_retry_dead_events_batch(mock_db_connection, mock_cursor):
     count = repo.retry_dead_events_batch([1, 2, 3])
     
     assert count == 3
-    # Verify UPDATE was called with IN clause (after SELECT 1 and SET timeout)
+    # Verify UPDATE was called with ANY clause (after SELECT 1 and SET timeout)
     assert mock_cursor.execute.call_count >= 3
     call_args = mock_cursor.execute.call_args_list[-1]
     sql = call_args[0][0]
     assert "UPDATE" in sql
-    assert "IN" in sql
+    assert "ANY" in sql
     assert "status = 'pending'" in sql
+    # Verify the list was passed as parameter
+    assert call_args[0][1] == ([1, 2, 3],)
 
 
 def test_retry_dead_events_batch_empty(mock_db_connection):
