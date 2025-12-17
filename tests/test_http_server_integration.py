@@ -195,7 +195,7 @@ class TestMetricsEndpoint:
             server.stop()
     
     def test_metrics_endpoint_no_function(self, mock_repository):
-        """Test /metrics endpoint returns 501 when no function is provided."""
+        """Test /metrics endpoint returns 404 when no function is provided (endpoint not registered)."""
         port = find_free_port()
         server = HttpServer(
             host="127.0.0.1",
@@ -208,8 +208,8 @@ class TestMetricsEndpoint:
             base_url = f"http://127.0.0.1:{port}"
             response = requests.get(f"{base_url}/metrics", timeout=1)
             
-            assert response.status_code == 501
-            assert "# Metrics not available" in response.text
+            # When metrics_fn is not provided, endpoint is not registered, so 404
+            assert response.status_code == 404
         finally:
             server.stop()
 
@@ -289,7 +289,7 @@ class TestDeadEventsListEndpoint:
         )
     
     def test_list_dead_events_no_repository(self, mock_repository):
-        """Test listing dead events returns 501 when no repository."""
+        """Test listing dead events returns 404 when no repository (endpoint not registered)."""
         port = find_free_port()
         server = HttpServer(
             host="127.0.0.1",
@@ -302,9 +302,8 @@ class TestDeadEventsListEndpoint:
             base_url = f"http://127.0.0.1:{port}"
             response = requests.get(f"{base_url}/api/dead-events", timeout=1)
             
-            assert response.status_code == 501
-            assert "error" in response.json()
-            assert "Repository not available" in response.json()["error"]
+            # When repository_fn is not provided, DLQ endpoints are not registered, so 404
+            assert response.status_code == 404
         finally:
             server.stop()
     
@@ -514,7 +513,7 @@ class TestRetryDeadEventsBatchEndpoint:
         assert "error" in response.json()
     
     def test_retry_dead_events_batch_no_repository(self, mock_repository):
-        """Test retrying batch returns 501 when no repository."""
+        """Test retrying batch returns 404 when no repository (endpoint not registered)."""
         port = find_free_port()
         server = HttpServer(
             host="127.0.0.1",
@@ -532,9 +531,8 @@ class TestRetryDeadEventsBatchEndpoint:
                 timeout=1
             )
             
-            assert response.status_code == 501
-            assert "error" in response.json()
-            assert "Repository not available" in response.json()["error"]
+            # When repository_fn is not provided, DLQ endpoints are not registered, so 404
+            assert response.status_code == 404
         finally:
             server.stop()
 
