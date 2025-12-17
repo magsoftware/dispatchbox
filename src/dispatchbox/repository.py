@@ -14,13 +14,15 @@ from dispatchbox.models import OutboxEvent
 class OutboxRepository:
     """Repository for managing outbox events in the database."""
 
-    def __init__(self, dsn: str, retry_backoff_seconds: int = 30) -> None:
+    def __init__(self, dsn: str, retry_backoff_seconds: int = 30, connect_timeout: int = 10, query_timeout: int = 30) -> None:
         """
         Initialize OutboxRepository.
 
         Args:
             dsn: PostgreSQL connection string
             retry_backoff_seconds: Seconds to wait before retrying failed events
+            connect_timeout: Connection timeout in seconds (default: 10)
+            query_timeout: Query timeout in seconds (default: 30)
 
         Raises:
             ValueError: If DSN is empty or invalid
@@ -31,12 +33,23 @@ class OutboxRepository:
         
         self.dsn: str = dsn.strip()
         self.retry_backoff: int = retry_backoff_seconds
+        self.query_timeout: int = query_timeout
         
         if retry_backoff_seconds < 0:
             raise ValueError("retry_backoff_seconds must be non-negative")
+        if connect_timeout < 0:
+            raise ValueError("connect_timeout must be non-negative")
+        if query_timeout < 0:
+            raise ValueError("query_timeout must be non-negative")
+        
+        # Add connect_timeout to DSN if not already present
+        dsn_with_timeout = self.dsn
+        if "connect_timeout" not in dsn_with_timeout:
+            separator = "&" if "?" in dsn_with_timeout else " "
+            dsn_with_timeout = f"{dsn_with_timeout}{separator}connect_timeout={connect_timeout}"
         
         try:
-            self.conn: Any = psycopg2.connect(self.dsn)
+            self.conn: Any = psycopg2.connect(dsn_with_timeout)
             self.conn.autocommit = False
         except psycopg2.OperationalError as e:
             logger.error("Failed to connect to database: {}", e)
@@ -61,7 +74,13 @@ class OutboxRepository:
                 pass
             
             try:
-                self.conn = psycopg2.connect(self.dsn)
+                # Reconnect with same timeout settings
+                dsn_with_timeout = self.dsn
+                if "connect_timeout" not in dsn_with_timeout:
+                    separator = "&" if "?" in dsn_with_timeout else " "
+                    dsn_with_timeout = f"{dsn_with_timeout}{separator}connect_timeout=10"
+                
+                self.conn = psycopg2.connect(dsn_with_timeout)
                 self.conn.autocommit = False
                 logger.info("Database connection restored")
             except psycopg2.OperationalError as e:
@@ -80,6 +99,8 @@ class OutboxRepository:
         """
         self._check_connection()
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Set query timeout
+            cur.execute(f"SET statement_timeout = {self.query_timeout * 1000}")  # Convert to milliseconds
             cur.execute(
                 """
                 SELECT id, aggregate_type, aggregate_id, event_type, payload, 
@@ -106,6 +127,8 @@ class OutboxRepository:
         """
         self._check_connection()
         with self.conn.cursor() as cur:
+            # Set query timeout
+            cur.execute(f"SET statement_timeout = {self.query_timeout * 1000}")  # Convert to milliseconds
             cur.execute(
                 """
                 UPDATE outbox_event
@@ -126,6 +149,8 @@ class OutboxRepository:
         """
         self._check_connection()
         with self.conn.cursor() as cur:
+            # Set query timeout
+            cur.execute(f"SET statement_timeout = {self.query_timeout * 1000}")  # Convert to milliseconds
             cur.execute(
                 """
                 UPDATE outbox_event
