@@ -3,7 +3,7 @@
 
 import argparse
 import sys
-from typing import Optional
+from typing import Optional, Callable
 from loguru import logger
 
 from dispatchbox.supervisor import start_processes
@@ -88,6 +88,95 @@ def help() -> None:
     parser.print_help()
 
 
+def setup_logging(log_level: str) -> None:
+    """
+    Configure loguru logger with specified level.
+
+    Args:
+        log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+    """
+    logger.remove()  # Remove default handler
+    logger.add(
+        sys.stderr,
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <yellow>{extra[worker]}</yellow> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        level=log_level.upper(),
+        colorize=True,
+    )
+    # Set default worker name for main process
+    logger.configure(extra={"worker": "main"})
+
+
+def create_db_check_function(dsn: str) -> Callable[[], bool]:
+    """
+    Create database check function for HTTP server.
+
+    Args:
+        dsn: PostgreSQL connection string
+
+    Returns:
+        Function that checks database connectivity
+    """
+    def check_db() -> bool:
+        try:
+            repo = OutboxRepository(dsn, connect_timeout=2, query_timeout=2)
+            is_connected = repo.is_connected()
+            repo.close()
+            return is_connected
+        except Exception:
+            return False
+    
+    return check_db
+
+
+def create_repository_factory(dsn: str) -> Callable[[], OutboxRepository]:
+    """
+    Create repository factory function for DLQ endpoints.
+
+    Args:
+        dsn: PostgreSQL connection string
+
+    Returns:
+        Factory function that returns a new repository instance
+    """
+    def get_repository() -> OutboxRepository:
+        """Factory function that returns a new repository instance for each request."""
+        return OutboxRepository(
+            dsn,
+            connect_timeout=2,
+            query_timeout=5,
+        )
+    
+    return get_repository
+
+
+def setup_http_server(args: argparse.Namespace) -> Optional[HttpServer]:
+    """
+    Setup and start HTTP server if enabled.
+
+    Args:
+        args: Parsed command-line arguments
+
+    Returns:
+        HttpServer instance if enabled, None otherwise
+    """
+    if args.disable_http:
+        return None
+
+    db_check_fn = create_db_check_function(args.dsn)
+    repository_fn = create_repository_factory(args.dsn)
+
+    http_server = HttpServer(
+        host=args.http_host,
+        port=args.http_port,
+        db_check_fn=db_check_fn,
+        repository_fn=repository_fn,
+    )
+    http_server.start()
+    logger.info("HTTP server enabled on {}:{}", args.http_host, args.http_port)
+    
+    return http_server
+
+
 def main() -> None:
     """Main entry point for the CLI."""
     args: argparse.Namespace = parse_args()
@@ -96,17 +185,7 @@ def main() -> None:
         help()
         return
 
-    # Configure loguru
-    log_level = args.log_level.upper()
-    logger.remove()  # Remove default handler
-    logger.add(
-        sys.stderr,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <yellow>{extra[worker]}</yellow> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-        level=log_level,
-        colorize=True,
-    )
-    # Set default worker name for main process
-    logger.configure(extra={"worker": "main"})
+    setup_logging(args.log_level)
     
     logger.info(
         "Starting dispatchbox supervisor: processes={} batch_size={} poll_interval={}",
@@ -115,36 +194,7 @@ def main() -> None:
         args.poll_interval
     )
 
-    # Start HTTP server for health checks, metrics, and API (if enabled)
-    http_server: Optional[HttpServer] = None
-    if not args.disable_http:
-        # Create a test repository to check DB connectivity
-        def check_db() -> bool:
-            try:
-                repo = OutboxRepository(args.dsn, connect_timeout=2, query_timeout=2)
-                is_connected = repo.is_connected()
-                repo.close()
-                return is_connected
-            except Exception:
-                return False
-
-        # Create repository factory for DLQ endpoints
-        def get_repository():
-            """Factory function that returns a new repository instance for each request."""
-            return OutboxRepository(
-                args.dsn,
-                connect_timeout=2,
-                query_timeout=5,
-            )
-
-        http_server = HttpServer(
-            host=args.http_host,
-            port=args.http_port,
-            db_check_fn=check_db,
-            repository_fn=get_repository,
-        )
-        http_server.start()
-        logger.info("HTTP server enabled on {}:{}", args.http_host, args.http_port)
+    http_server = setup_http_server(args)
 
     try:
         start_processes(
