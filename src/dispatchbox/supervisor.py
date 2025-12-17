@@ -44,6 +44,14 @@ def worker_loop(
     # Configure logger with worker name for all logs in this process
     logger.configure(extra={"worker": full_worker_name})
     
+    # Setup signal handlers for graceful shutdown
+    def _signal_handler(sig: int, frame: Any) -> None:
+        logger.info("Worker {} received signal {}, initiating shutdown...", full_worker_name, sig)
+        stop_event.set()
+    
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+    
     repository = OutboxRepository(
         dsn=dsn,
         retry_backoff_seconds=retry_backoff_seconds
