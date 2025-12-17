@@ -54,19 +54,19 @@ class OutboxRepository:
 
     SET_TIMEOUT_SQL = "SET statement_timeout = %s;"
 
-    FETCH_DEAD_EVENTS_SQL = """
+    FETCH_DEAD_EVENTS_BASE_SQL = """
         SELECT id, aggregate_type, aggregate_id, event_type, payload, 
                status, attempts, next_run_at, created_at
         FROM outbox_event
         WHERE status = 'dead'
-        ORDER BY created_at DESC
-        LIMIT %s OFFSET %s;
     """
 
-    COUNT_DEAD_EVENTS_SQL = """
+    FETCH_DEAD_EVENTS_ORDER_LIMIT_SQL = " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+
+    COUNT_DEAD_EVENTS_BASE_SQL = """
         SELECT COUNT(*) as count
         FROM outbox_event
-        WHERE status = 'dead';
+        WHERE status = 'dead'
     """
 
     FETCH_DEAD_EVENT_BY_ID_SQL = """
@@ -318,13 +318,8 @@ class OutboxRepository:
 
         self._check_connection()
         
-        # Build dynamic SQL with optional filters
-        sql = """
-            SELECT id, aggregate_type, aggregate_id, event_type, payload, 
-                   status, attempts, next_run_at, created_at
-            FROM outbox_event
-            WHERE status = 'dead'
-        """
+        # Build SQL with optional filters using base constant
+        sql = self.FETCH_DEAD_EVENTS_BASE_SQL
         params: List[Any] = []
         
         if aggregate_type:
@@ -335,7 +330,7 @@ class OutboxRepository:
             sql += " AND event_type = %s"
             params.append(event_type)
         
-        sql += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        sql += self.FETCH_DEAD_EVENTS_ORDER_LIMIT_SQL
         params.extend([limit, offset])
         
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -362,7 +357,8 @@ class OutboxRepository:
         """
         self._check_connection()
         
-        sql = "SELECT COUNT(*) as count FROM outbox_event WHERE status = 'dead'"
+        # Build SQL with optional filters using base constant
+        sql = self.COUNT_DEAD_EVENTS_BASE_SQL
         params: List[Any] = []
         
         if aggregate_type:
