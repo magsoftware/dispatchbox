@@ -92,6 +92,28 @@ psql -U postgres -d outbox -f sql/insert_outbox.sql
 
 ## Usage
 
+### Installing the command
+
+Before using the `dispatchbox` command, you need to install the package in editable mode:
+
+```bash
+uv pip install -e ".[dev]"
+```
+
+This will make the `dispatchbox` command available in your PATH.
+
+**Alternative ways to run:**
+
+If the command is not available, you can use:
+
+```bash
+# Using uv run (recommended)
+uv run dispatchbox --dsn "host=localhost port=5432 dbname=outbox user=postgres password=postgres"
+
+# Or as a Python module
+python -m dispatchbox.cli --dsn "host=localhost port=5432 dbname=outbox user=postgres password=postgres"
+```
+
 ### Basic usage
 
 ```bash
