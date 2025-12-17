@@ -7,8 +7,13 @@ Dispatchbox is a high-performance outbox pattern worker for PostgreSQL. It proce
 - Multi-process architecture for horizontal scaling
 - Multi-threaded processing within each process
 - PostgreSQL `FOR UPDATE SKIP LOCKED` for safe concurrent access
-- Automatic retry mechanism with configurable backoff
+- Automatic retry mechanism with configurable backoff and max attempts
+- Dead Letter Queue (DLQ) - events exceeding max attempts are marked as 'dead'
 - Event status tracking (pending, retry, done, dead)
+- Connection health check with automatic reconnection
+- Configurable timeouts (connection and query)
+- Graceful shutdown with signal handling (SIGTERM/SIGINT)
+- Structured logging with loguru and worker identification
 - Configurable batch size and polling interval
 
 ## Requirements
@@ -118,6 +123,14 @@ python -m dispatchbox.cli \
 - `--poll-interval`: Seconds to sleep when no work (default: 1.0)
 - `--log-level`: Logging level - DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
 
+### Configuration defaults
+
+- `max_attempts`: Maximum retry attempts before marking event as dead (default: 5)
+- `retry_backoff_seconds`: Seconds to wait before retrying failed events (default: 30)
+- `connect_timeout`: Database connection timeout in seconds (default: 10)
+- `query_timeout`: Database query timeout in seconds (default: 30)
+- `max_parallel`: Maximum parallel threads per worker process (default: 10)
+
 ## Running Tests
 
 ### Run all tests
@@ -171,18 +184,33 @@ outbox/
 │   ├── schema.sql
 │   └── insert_outbox.sql
 └── docs/                 # Documentation
-    └── plans/            # Development plans
+    ├── plans/            # Development plans
+    ├── IMPROVEMENTS.md   # Improvement proposals
+    └── DEAD_LETTER_QUEUE.md  # Dead Letter Queue documentation
 ```
 
 ## How It Works
 
 1. **Multiple worker processes** are started, each with its own database connection
-2. Each process runs a **polling loop** that fetches pending/retry events
-3. Events are fetched using `FOR UPDATE SKIP LOCKED` to prevent conflicts
-4. Each event is processed in a **separate thread** using ThreadPoolExecutor
-5. On success, events are marked as `done`
-6. On failure, events are marked as `retry` with updated `next_run_at`
-7. After max attempts, events are marked as `dead`
+2. Each worker process has a unique name (e.g., `worker-00-pid12345`) for logging identification
+3. Each process runs a **polling loop** that fetches pending/retry events
+4. Events are fetched using `FOR UPDATE SKIP LOCKED` to prevent conflicts
+5. **Connection health check** is performed before each operation with automatic reconnection
+6. Each event is processed in a **separate thread** using ThreadPoolExecutor
+7. On success, events are marked as `done`
+8. On failure, events are marked as `retry` with updated `next_run_at` and incremented attempts
+9. After `max_attempts` (default: 5), events are marked as `dead` and moved to Dead Letter Queue
+10. Dead events are logged with warnings and can be reviewed/manually retried (see [Dead Letter Queue docs](docs/DEAD_LETTER_QUEUE.md))
+
+## Dead Letter Queue
+
+Events that exceed the maximum retry attempts are marked as `dead` and stored in the database. These events are not automatically processed anymore, allowing you to:
+
+- Review problematic events
+- Analyze failure patterns
+- Manually retry after fixing underlying issues
+
+See [Dead Letter Queue documentation](docs/DEAD_LETTER_QUEUE.md) for details on current implementation and future enhancements.
 
 ## Event Handlers
 
