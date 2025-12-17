@@ -259,16 +259,50 @@ outbox/
 
 ## How It Works
 
+### Architecture Overview
+
 1. **Multiple worker processes** are started, each with its own database connection
 2. Each worker process has a unique name (e.g., `worker-00-pid12345`) for logging identification
 3. Each process runs a **polling loop** that fetches pending/retry events
 4. Events are fetched using `FOR UPDATE SKIP LOCKED` to prevent conflicts
-5. **Connection health check** is performed before each operation with automatic reconnection
-6. Each event is processed in a **separate thread** using ThreadPoolExecutor
-7. On success, events are marked as `done`
-8. On failure, events are marked as `retry` with updated `next_run_at` and incremented attempts
-9. After `max_attempts` (default: 5), events are marked as `dead` and moved to Dead Letter Queue
-10. Dead events are logged with warnings and can be reviewed/manually retried (see [Dead Letter Queue docs](docs/DEAD_LETTER_QUEUE.md))
+5. Each event is processed in a **separate thread** using ThreadPoolExecutor
+6. On success, events are marked as `done`
+7. On failure, events are marked as `retry` with updated `next_run_at` and incremented attempts
+8. After `max_attempts` (default: 5), events are marked as `dead` and moved to Dead Letter Queue
+9. Dead events are logged with warnings and can be reviewed/manually retried (see [Dead Letter Queue docs](docs/DEAD_LETTER_QUEUE.md))
+
+### Database Connection Management
+
+**Connection Architecture:**
+- Each worker process maintains **one dedicated database connection** throughout its lifetime
+- Connections are established during `OutboxRepository` initialization with configurable timeouts
+- The connection is managed using a context manager (`with repository:`) ensuring proper cleanup on shutdown
+
+**Connection Resilience:**
+- **Health checks** are performed before every database operation using `SELECT 1`
+- If a connection is lost, **automatic reconnection** is attempted with exponential backoff
+- Connection status can be checked via `is_connected()` method (used by readiness probes)
+- Failed reconnection attempts are logged and operations are retried
+
+**Transaction Management:**
+- All database operations use **manual transaction control** (`autocommit = False`)
+- Each operation (fetch, mark_success, mark_retry) performs its own `COMMIT`
+- `FOR UPDATE SKIP LOCKED` ensures safe concurrent access:
+  - Multiple workers can fetch different events simultaneously
+  - Locked rows are skipped, preventing blocking between workers
+  - This enables true parallel processing across processes
+
+**Query Timeouts:**
+- **Connection timeout** (default: 10s) - limits time to establish connection
+- **Query timeout** (default: 30s) - set via `SET statement_timeout` before each query
+- Timeouts prevent workers from hanging indefinitely on slow or stuck queries
+- Timeout values are configurable per repository instance
+
+**Concurrency Model:**
+- **Process-level**: Multiple worker processes run independently, each with its own connection
+- **Thread-level**: Within each process, multiple threads process events in parallel
+- **Database-level**: PostgreSQL's row-level locking (`FOR UPDATE SKIP LOCKED`) ensures no conflicts
+- All threads in a process share the same connection, but operations are serialized through transactions
 
 ## Dead Letter Queue
 
