@@ -15,6 +15,45 @@ from dispatchbox.config import DEFAULT_MAX_ATTEMPTS
 class OutboxRepository:
     """Repository for managing outbox events in the database."""
 
+    # SQL queries as class constants
+    FETCH_PENDING_SQL = """
+        SELECT id, aggregate_type, aggregate_id, event_type, payload, 
+               status, attempts, next_run_at, created_at
+        FROM outbox_event
+        WHERE status IN ('pending','retry')
+          AND next_run_at <= now()
+        ORDER BY id
+        FOR UPDATE SKIP LOCKED
+        LIMIT %s;
+    """
+
+    MARK_SUCCESS_SQL = """
+        UPDATE outbox_event
+        SET status = 'done',
+            attempts = attempts + 1
+        WHERE id = %s;
+    """
+
+    MARK_RETRY_SQL = """
+        UPDATE outbox_event
+        SET status = CASE 
+            WHEN attempts + 1 >= %s THEN 'dead'
+            ELSE 'retry'
+        END,
+        attempts = attempts + 1,
+        next_run_at = CASE
+            WHEN attempts + 1 >= %s THEN next_run_at
+            ELSE %s
+        END
+        WHERE id = %s;
+    """
+
+    CHECK_STATUS_SQL = "SELECT status FROM outbox_event WHERE id = %s;"
+
+    CHECK_CONNECTION_SQL = "SELECT 1;"
+
+    SET_TIMEOUT_SQL = "SET statement_timeout = %s;"
+
     def __init__(
         self,
         dsn: str,
@@ -71,6 +110,16 @@ class OutboxRepository:
             logger.error("Failed to connect to database: {}", e)
             raise
 
+    def _set_query_timeout(self, cur: Any) -> None:
+        """
+        Set query timeout for current cursor.
+
+        Args:
+            cur: Database cursor
+        """
+        timeout_ms = self.query_timeout * 1000  # Convert to milliseconds
+        cur.execute(self.SET_TIMEOUT_SQL, (timeout_ms,))
+
     def _check_connection(self) -> None:
         """
         Check if database connection is alive and reconnect if needed.
@@ -81,7 +130,7 @@ class OutboxRepository:
         try:
             # Try to execute a simple query to check connection
             with self.conn.cursor() as cur:
-                cur.execute("SELECT 1")
+                cur.execute(self.CHECK_CONNECTION_SQL)
         except (psycopg2.OperationalError, psycopg2.InterfaceError):
             logger.warning("Database connection lost, attempting to reconnect...")
             try:
@@ -113,23 +162,13 @@ class OutboxRepository:
         Returns:
             List of OutboxEvent instances
         """
+        if batch_size < 1:
+            raise ValueError("batch_size must be at least 1")
+        
         self._check_connection()
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Set query timeout
-            cur.execute(f"SET statement_timeout = {self.query_timeout * 1000}")  # Convert to milliseconds
-            cur.execute(
-                """
-                SELECT id, aggregate_type, aggregate_id, event_type, payload, 
-                       status, attempts, next_run_at, created_at
-                FROM outbox_event
-                WHERE status IN ('pending','retry')
-                  AND next_run_at <= now()
-                ORDER BY id
-                FOR UPDATE SKIP LOCKED
-                LIMIT %s;
-                """,
-                (batch_size,),
-            )
+            self._set_query_timeout(cur)
+            cur.execute(self.FETCH_PENDING_SQL, (batch_size,))
             rows = cur.fetchall()
             self.conn.commit()
             return [OutboxEvent.from_dict(dict(row)) for row in rows]
@@ -140,20 +179,17 @@ class OutboxRepository:
 
         Args:
             event_id: ID of the event to mark as successful
+
+        Raises:
+            ValueError: If event_id is invalid
         """
+        if event_id is None or event_id < 1:
+            raise ValueError("event_id must be a positive integer")
+        
         self._check_connection()
         with self.conn.cursor() as cur:
-            # Set query timeout
-            cur.execute(f"SET statement_timeout = {self.query_timeout * 1000}")  # Convert to milliseconds
-            cur.execute(
-                """
-                UPDATE outbox_event
-                SET status = 'done',
-                    attempts = attempts + 1
-                WHERE id = %s;
-                """,
-                (event_id,),
-            )
+            self._set_query_timeout(cur)
+            cur.execute(self.MARK_SUCCESS_SQL, (event_id,))
         self.conn.commit()
 
     def mark_retry(self, event_id: int) -> None:
@@ -163,34 +199,32 @@ class OutboxRepository:
 
         Args:
             event_id: ID of the event to mark for retry
+
+        Raises:
+            ValueError: If event_id is invalid
         """
+        if event_id is None or event_id < 1:
+            raise ValueError("event_id must be a positive integer")
+        
         self._check_connection()
+        next_run_at = datetime.now(timezone.utc) + timedelta(seconds=self.retry_backoff)
+        
         with self.conn.cursor() as cur:
-            # Set query timeout
-            cur.execute(f"SET statement_timeout = {self.query_timeout * 1000}")  # Convert to milliseconds
-            # Check current attempts and update accordingly
+            self._set_query_timeout(cur)
             cur.execute(
-                """
-                UPDATE outbox_event
-                SET status = CASE 
-                    WHEN attempts + 1 >= %s THEN 'dead'
-                    ELSE 'retry'
-                END,
-                attempts = attempts + 1,
-                next_run_at = CASE
-                    WHEN attempts + 1 >= %s THEN next_run_at
-                    ELSE %s
-                END
-                WHERE id = %s;
-                """,
-                (self.max_attempts, self.max_attempts, datetime.now(timezone.utc) + timedelta(seconds=self.retry_backoff), event_id),
+                self.MARK_RETRY_SQL,
+                (self.max_attempts, self.max_attempts, next_run_at, event_id),
             )
             if cur.rowcount > 0:
                 # Log if event was marked as dead
-                cur.execute("SELECT status FROM outbox_event WHERE id = %s", (event_id,))
+                cur.execute(self.CHECK_STATUS_SQL, (event_id,))
                 result = cur.fetchone()
                 if result and result[0] == 'dead':
-                    logger.warning("Event {} exceeded max_attempts ({}), marked as dead", event_id, self.max_attempts)
+                    logger.warning(
+                        "Event {} exceeded max_attempts ({}), marked as dead",
+                        event_id,
+                        self.max_attempts,
+                    )
         self.conn.commit()
 
     def close(self) -> None:

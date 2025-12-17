@@ -84,10 +84,10 @@ def test_fetch_pending_calls_correct_sql(mock_db_connection, mock_cursor):
     assert mock_cursor.execute.call_count == 3
     call_args = mock_cursor.execute.call_args_list[2]
     assert call_args is not None
-    sql = call_args[0][0]
-    assert "SELECT" in sql
-    assert "outbox_event" in sql
-    assert "FOR UPDATE SKIP LOCKED" in sql
+    # Verify it uses the class constant (normalize whitespace for comparison)
+    sql_called = call_args[0][0].strip()
+    sql_expected = OutboxRepository.FETCH_PENDING_SQL.strip()
+    assert sql_called == sql_expected
     assert call_args[0][1] == (5,)  # batch_size parameter
 
 
@@ -242,4 +242,43 @@ def test_repository_init_invalid_max_attempts():
     """Test that max_attempts < 1 raises ValueError."""
     with pytest.raises(ValueError, match="max_attempts must be at least 1"):
         OutboxRepository("host=localhost dbname=test", max_attempts=0)
+
+
+def test_fetch_pending_invalid_batch_size(mock_db_connection):
+    """Test that fetch_pending with invalid batch_size raises ValueError."""
+    repo = OutboxRepository("host=localhost dbname=test")
+    
+    with pytest.raises(ValueError, match="batch_size must be at least 1"):
+        repo.fetch_pending(0)
+    
+    with pytest.raises(ValueError, match="batch_size must be at least 1"):
+        repo.fetch_pending(-1)
+
+
+def test_mark_success_invalid_event_id(mock_db_connection):
+    """Test that mark_success with invalid event_id raises ValueError."""
+    repo = OutboxRepository("host=localhost dbname=test")
+    
+    with pytest.raises(ValueError, match="event_id must be a positive integer"):
+        repo.mark_success(0)
+    
+    with pytest.raises(ValueError, match="event_id must be a positive integer"):
+        repo.mark_success(-1)
+    
+    with pytest.raises(ValueError, match="event_id must be a positive integer"):
+        repo.mark_success(None)
+
+
+def test_mark_retry_invalid_event_id(mock_db_connection):
+    """Test that mark_retry with invalid event_id raises ValueError."""
+    repo = OutboxRepository("host=localhost dbname=test")
+    
+    with pytest.raises(ValueError, match="event_id must be a positive integer"):
+        repo.mark_retry(0)
+    
+    with pytest.raises(ValueError, match="event_id must be a positive integer"):
+        repo.mark_retry(-1)
+    
+    with pytest.raises(ValueError, match="event_id must be a positive integer"):
+        repo.mark_retry(None)
 
