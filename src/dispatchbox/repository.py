@@ -42,6 +42,32 @@ class OutboxRepository:
             logger.error("Failed to connect to database: {}", e)
             raise
 
+    def _check_connection(self) -> None:
+        """
+        Check if database connection is alive and reconnect if needed.
+
+        Raises:
+            psycopg2.OperationalError: If connection cannot be restored
+        """
+        try:
+            # Try to execute a simple query to check connection
+            with self.conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            logger.warning("Database connection lost, attempting to reconnect...")
+            try:
+                self.conn.close()
+            except Exception:
+                pass
+            
+            try:
+                self.conn = psycopg2.connect(self.dsn)
+                self.conn.autocommit = False
+                logger.info("Database connection restored")
+            except psycopg2.OperationalError as e:
+                logger.error("Failed to reconnect to database: {}", e)
+                raise
+
     def fetch_pending(self, batch_size: int) -> List[OutboxEvent]:
         """
         Fetch a batch of pending/retry events from the database.
@@ -52,6 +78,7 @@ class OutboxRepository:
         Returns:
             List of OutboxEvent instances
         """
+        self._check_connection()
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
@@ -77,6 +104,7 @@ class OutboxRepository:
         Args:
             event_id: ID of the event to mark as successful
         """
+        self._check_connection()
         with self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -96,6 +124,7 @@ class OutboxRepository:
         Args:
             event_id: ID of the event to mark for retry
         """
+        self._check_connection()
         with self.conn.cursor() as cur:
             cur.execute(
                 """

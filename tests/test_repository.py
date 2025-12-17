@@ -51,7 +51,10 @@ def test_fetch_pending_returns_events(mock_db_connection, mock_cursor, sample_ev
     assert isinstance(events[0], OutboxEvent)
     assert events[0].id == 1
     assert events[0].event_type == "order.created"
-    mock_cursor.execute.assert_called_once()
+    # _check_connection() calls execute('SELECT 1'), then fetch_pending calls execute again
+    assert mock_cursor.execute.call_count == 2
+    # Verify the actual query was called
+    assert "SELECT id" in mock_cursor.execute.call_args_list[1][0][0]
     mock_db_connection.commit.assert_called()
 
 
@@ -63,7 +66,10 @@ def test_fetch_pending_empty_result(mock_db_connection, mock_cursor):
     events = repo.fetch_pending(10)
     
     assert events == []
-    mock_cursor.execute.assert_called_once()
+    # _check_connection() calls execute('SELECT 1'), then fetch_pending calls execute again
+    assert mock_cursor.execute.call_count == 2
+    # Verify the actual query was called
+    assert "SELECT id" in mock_cursor.execute.call_args_list[1][0][0]
     mock_db_connection.commit.assert_called()
 
 
@@ -74,8 +80,9 @@ def test_fetch_pending_calls_correct_sql(mock_db_connection, mock_cursor):
     repo = OutboxRepository("host=localhost dbname=test")
     repo.fetch_pending(5)
     
-    # Check SQL query was called with correct parameters
-    call_args = mock_cursor.execute.call_args
+    # Check SQL query was called with correct parameters (last call, after SELECT 1)
+    assert mock_cursor.execute.call_count == 2
+    call_args = mock_cursor.execute.call_args_list[1]
     assert call_args is not None
     sql = call_args[0][0]
     assert "SELECT" in sql
@@ -120,8 +127,10 @@ def test_mark_success(mock_db_connection, mock_cursor):
     repo = OutboxRepository("host=localhost dbname=test")
     repo.mark_success(123)
     
-    mock_cursor.execute.assert_called_once()
-    call_args = mock_cursor.execute.call_args
+    # _check_connection() calls execute('SELECT 1'), then mark_success calls execute again
+    assert mock_cursor.execute.call_count == 2
+    # Verify the UPDATE query was called (last call)
+    call_args = mock_cursor.execute.call_args_list[1]
     sql = call_args[0][0]
     assert "UPDATE" in sql
     assert "status = 'done'" in sql
@@ -135,13 +144,16 @@ def test_mark_retry(mock_db_connection, mock_cursor):
     
     with patch("dispatchbox.repository.datetime") as mock_datetime:
         mock_now = datetime.now(timezone.utc)
-        mock_datetime.utcnow.return_value = mock_now
+        mock_datetime.now.return_value = mock_now
         mock_datetime.timedelta = timedelta
+        mock_datetime.timezone = timezone
         
         repo.mark_retry(456)
         
-        mock_cursor.execute.assert_called_once()
-        call_args = mock_cursor.execute.call_args
+        # _check_connection() calls execute('SELECT 1'), then mark_retry calls execute again
+        assert mock_cursor.execute.call_count == 2
+        # Verify the UPDATE query was called (last call)
+        call_args = mock_cursor.execute.call_args_list[1]
         sql = call_args[0][0]
         assert "UPDATE" in sql
         assert "status = 'retry'" in sql
