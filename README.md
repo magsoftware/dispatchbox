@@ -412,3 +412,23 @@ Default handlers are defined in `src/dispatchbox/handlers.py`. You can extend th
 1. Adding new handler functions
 2. Registering them in the `HANDLERS` dictionary
 3. Using custom handlers when initializing `OutboxWorker`
+
+### Handler Interface
+
+Event handlers are simple functions that receive only the event `payload`:
+
+```python
+def my_handler(payload: Dict[str, Any]) -> None:
+    """Process event payload."""
+    # Handler logic here
+    pass
+```
+
+**Important:** Handlers do **not** have direct access to the database connection or `OutboxRepository`. They receive only the event payload (JSON data from the `payload` column).
+
+If your handler needs database access, you have two options:
+
+1. **Create a new database connection within the handler** (for read-only operations or separate transactions)
+2. **Pass repository/repository factory to handlers** (requires modifying handler signature and worker code)
+
+The current design keeps handlers stateless and focused on business logic, while database operations (fetch, mark success/retry) are handled by the worker framework.
