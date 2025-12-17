@@ -128,10 +128,20 @@ def main() -> None:
             except Exception:
                 return False
 
+        # Create repository factory for DLQ endpoints
+        def get_repository():
+            """Factory function that returns a new repository instance for each request."""
+            return OutboxRepository(
+                args.dsn,
+                connect_timeout=2,
+                query_timeout=5,
+            )
+
         http_server = HttpServer(
             host=args.http_host,
             port=args.http_port,
             db_check_fn=check_db,
+            repository_fn=get_repository,
         )
         http_server.start()
         logger.info("HTTP server enabled on {}:{}", args.http_host, args.http_port)

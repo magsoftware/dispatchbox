@@ -197,8 +197,10 @@ outbox/
 │   ├── conftest.py
 │   ├── test_handlers.py
 │   ├── test_http_server.py
+│   ├── test_http_server_dlq.py  # DLQ endpoint tests
 │   ├── test_models.py
 │   ├── test_repository.py
+│   ├── test_repository_dlq.py   # DLQ repository tests
 │   ├── test_supervisor.py
 │   └── test_worker.py
 ├── scripts/                   # Utility scripts
@@ -265,12 +267,44 @@ Dispatchbox includes an HTTP server (enabled by default) that provides:
   - Status: `200 OK` (if metrics available) or `501 Not Implemented` (if not configured)
   - Use for: Prometheus scraping
 
+### Dead Letter Queue API
+
+- **`GET /api/dead-events`** - List dead events
+  - Query parameters:
+    - `limit`: Maximum number of events (default: 100, max: 1000)
+    - `offset`: Offset for pagination (default: 0)
+    - `aggregate_type`: Filter by aggregate type (optional)
+    - `event_type`: Filter by event type (optional)
+  - Returns: `{"events": [...], "count": N, "limit": N, "offset": N}`
+  - Status: `200 OK`
+
+- **`GET /api/dead-events/stats`** - Get statistics about dead events
+  - Query parameters:
+    - `aggregate_type`: Filter by aggregate type (optional)
+    - `event_type`: Filter by event type (optional)
+  - Returns: `{"total": N, "aggregate_type": "...", "event_type": "..."}`
+  - Status: `200 OK`
+
+- **`GET /api/dead-events/<event_id>`** - Get a single dead event by ID
+  - Returns: Event data as JSON
+  - Status: `200 OK` (found) or `404 Not Found`
+
+- **`POST /api/dead-events/<event_id>/retry`** - Retry a single dead event
+  - Returns: `{"status": "success", "message": "...", "event_id": N}`
+  - Status: `200 OK` (success) or `404 Not Found` (event not found)
+
+- **`POST /api/dead-events/retry-batch`** - Retry multiple dead events
+  - Request body: `{"event_ids": [1, 2, 3, ...]}`
+  - Returns: `{"status": "success", "message": "...", "requested": N, "processed": N}`
+  - Status: `200 OK`
+
 ### Configuration
 
 The HTTP server runs in a background thread and doesn't block worker processes. It can be:
 - Configured via `--http-host` and `--http-port` CLI options
 - Disabled with `--disable-http` flag
 - Used for Kubernetes health checks and monitoring
+- Provides REST API for Dead Letter Queue management
 
 ## Event Handlers
 
