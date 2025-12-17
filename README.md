@@ -210,6 +210,7 @@ outbox/
 │   ├── schema.sql
 │   └── insert_outbox.sql
 ├── docs/                      # Documentation
+│   ├── BOTTLE_DECORATORS_EXPLANATION.md  # Bottle decorators design decision
 │   ├── DEAD_LETTER_QUEUE.md   # Dead Letter Queue documentation
 │   ├── HTTP_FRAMEWORK_ANALYSIS.md  # HTTP framework analysis
 │   ├── IMPROVEMENTS.md        # Improvement proposals
