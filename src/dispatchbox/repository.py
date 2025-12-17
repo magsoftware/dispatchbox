@@ -120,6 +120,20 @@ class OutboxRepository:
         timeout_ms = self.query_timeout * 1000  # Convert to milliseconds
         cur.execute(self.SET_TIMEOUT_SQL, (timeout_ms,))
 
+    def is_connected(self) -> bool:
+        """
+        Check if database connection is alive (without reconnecting).
+
+        Returns:
+            True if connection is alive, False otherwise
+        """
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(self.CHECK_CONNECTION_SQL)
+            return True
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            return False
+
     def _check_connection(self) -> None:
         """
         Check if database connection is alive and reconnect if needed.

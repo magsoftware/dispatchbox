@@ -3,6 +3,8 @@
 import pytest
 from datetime import datetime, timezone, timedelta
 from unittest.mock import Mock, MagicMock, patch
+import psycopg2
+
 from dispatchbox.repository import OutboxRepository
 from dispatchbox.models import OutboxEvent
 
@@ -281,4 +283,21 @@ def test_mark_retry_invalid_event_id(mock_db_connection):
     
     with pytest.raises(ValueError, match="event_id must be a positive integer"):
         repo.mark_retry(None)
+
+
+def test_is_connected(mock_db_connection, mock_cursor):
+    """Test is_connected method."""
+    repo = OutboxRepository("host=localhost dbname=test")
+    
+    # Should return True when connection is alive
+    assert repo.is_connected() is True
+
+
+def test_is_connected_false_on_error(mock_db_connection):
+    """Test is_connected returns False when connection error occurs."""
+    repo = OutboxRepository("host=localhost dbname=test")
+    
+    # Simulate connection error
+    with patch.object(repo.conn, 'cursor', side_effect=psycopg2.OperationalError("Connection lost")):
+        assert repo.is_connected() is False
 
