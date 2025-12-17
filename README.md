@@ -1,6 +1,21 @@
 # Dispatchbox
 
-Dispatchbox is a high-performance outbox pattern worker for PostgreSQL. It processes events from an outbox table using multi-process and multi-threaded architecture with `FOR UPDATE SKIP LOCKED` for efficient parallel processing.
+Dispatchbox is a high-performance outbox pattern worker for PostgreSQL designed to reliably process events from an outbox table. It implements the transactional outbox pattern, ensuring that events published within database transactions are eventually processed and delivered, even in the face of failures.
+
+## Overview
+
+The outbox pattern is a critical component of event-driven architectures, solving the dual-write problem by ensuring that events are written to the database as part of the same transaction that updates business data. Dispatchbox then asynchronously processes these events, guaranteeing at-least-once delivery semantics.
+
+Dispatchbox uses a multi-process and multi-threaded architecture with PostgreSQL's `FOR UPDATE SKIP LOCKED` feature for efficient, safe parallel processing. This allows multiple worker processes to process events concurrently without conflicts, maximizing throughput while maintaining data consistency.
+
+Key capabilities include:
+
+- **Reliable Event Processing**: Events are processed with automatic retry mechanisms and configurable backoff strategies
+- **Dead Letter Queue (DLQ)**: Events that exceed maximum retry attempts are moved to a DLQ for manual inspection and recovery
+- **Horizontal Scaling**: Multi-process architecture allows scaling across CPU cores and machines
+- **Health Monitoring**: Built-in HTTP endpoints for health checks, readiness probes, and metrics
+- **Graceful Shutdown**: Proper signal handling ensures in-flight events are completed before shutdown
+- **Connection Resilience**: Automatic reconnection and health checks ensure continuous operation
 
 ## Features
 
