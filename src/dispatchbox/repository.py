@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Repository for outbox events database operations."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Any
 
 import psycopg2
@@ -90,7 +90,7 @@ class OutboxRepository:
                     next_run_at = %s
                 WHERE id = %s;
                 """,
-                (datetime.utcnow() + timedelta(seconds=self.retry_backoff), event_id),
+                (datetime.now(timezone.utc) + timedelta(seconds=self.retry_backoff), event_id),
             )
         self.conn.commit()
 
