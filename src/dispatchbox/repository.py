@@ -9,12 +9,13 @@ from psycopg2.extras import RealDictCursor
 from loguru import logger
 
 from dispatchbox.models import OutboxEvent
+from dispatchbox.config import DEFAULT_MAX_ATTEMPTS
 
 
 class OutboxRepository:
     """Repository for managing outbox events in the database."""
 
-    def __init__(self, dsn: str, retry_backoff_seconds: int = 30, connect_timeout: int = 10, query_timeout: int = 30) -> None:
+    def __init__(self, dsn: str, retry_backoff_seconds: int = 30, connect_timeout: int = 10, query_timeout: int = 30, max_attempts: int = DEFAULT_MAX_ATTEMPTS) -> None:
         """
         Initialize OutboxRepository.
 
@@ -23,6 +24,7 @@ class OutboxRepository:
             retry_backoff_seconds: Seconds to wait before retrying failed events
             connect_timeout: Connection timeout in seconds (default: 10)
             query_timeout: Query timeout in seconds (default: 30)
+            max_attempts: Maximum number of retry attempts before marking event as dead (default: 5)
 
         Raises:
             ValueError: If DSN is empty or invalid
@@ -34,6 +36,7 @@ class OutboxRepository:
         self.dsn: str = dsn.strip()
         self.retry_backoff: int = retry_backoff_seconds
         self.query_timeout: int = query_timeout
+        self.max_attempts: int = max_attempts
         
         if retry_backoff_seconds < 0:
             raise ValueError("retry_backoff_seconds must be non-negative")
@@ -41,6 +44,8 @@ class OutboxRepository:
             raise ValueError("connect_timeout must be non-negative")
         if query_timeout < 0:
             raise ValueError("query_timeout must be non-negative")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
         
         # Add connect_timeout to DSN if not already present
         dsn_with_timeout = self.dsn
@@ -143,6 +148,7 @@ class OutboxRepository:
     def mark_retry(self, event_id: int) -> None:
         """
         Mark an event for retry with updated next_run_at timestamp.
+        If max_attempts is exceeded, mark event as 'dead' instead.
 
         Args:
             event_id: ID of the event to mark for retry
@@ -151,16 +157,29 @@ class OutboxRepository:
         with self.conn.cursor() as cur:
             # Set query timeout
             cur.execute(f"SET statement_timeout = {self.query_timeout * 1000}")  # Convert to milliseconds
+            # Check current attempts and update accordingly
             cur.execute(
                 """
                 UPDATE outbox_event
-                SET status = 'retry',
-                    attempts = attempts + 1,
-                    next_run_at = %s
+                SET status = CASE 
+                    WHEN attempts + 1 >= %s THEN 'dead'
+                    ELSE 'retry'
+                END,
+                attempts = attempts + 1,
+                next_run_at = CASE
+                    WHEN attempts + 1 >= %s THEN next_run_at
+                    ELSE %s
+                END
                 WHERE id = %s;
                 """,
-                (datetime.now(timezone.utc) + timedelta(seconds=self.retry_backoff), event_id),
+                (self.max_attempts, self.max_attempts, datetime.now(timezone.utc) + timedelta(seconds=self.retry_backoff), event_id),
             )
+            if cur.rowcount > 0:
+                # Log if event was marked as dead
+                cur.execute("SELECT status FROM outbox_event WHERE id = %s", (event_id,))
+                result = cur.fetchone()
+                if result and result[0] == 'dead':
+                    logger.warning("Event {} exceeded max_attempts ({}), marked as dead", event_id, self.max_attempts)
         self.conn.commit()
 
     def close(self) -> None:

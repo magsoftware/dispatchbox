@@ -140,6 +140,9 @@ def test_mark_success(mock_db_connection, mock_cursor):
 
 def test_mark_retry(mock_db_connection, mock_cursor):
     """Test mark_retry updates event status and next_run_at."""
+    mock_cursor.rowcount = 1  # Mock rowcount for UPDATE
+    mock_cursor.fetchone.return_value = ('retry',)  # Mock fetchone for status check
+    
     repo = OutboxRepository("host=localhost dbname=test", retry_backoff_seconds=60)
     
     with patch("dispatchbox.repository.datetime") as mock_datetime:
@@ -150,16 +153,16 @@ def test_mark_retry(mock_db_connection, mock_cursor):
         
         repo.mark_retry(456)
         
-        # _check_connection() calls execute('SELECT 1'), then SET statement_timeout, then UPDATE
-        assert mock_cursor.execute.call_count == 3
-        # Verify the UPDATE query was called (last call)
+        # _check_connection() calls execute('SELECT 1'), then SET statement_timeout, then UPDATE, then SELECT status
+        assert mock_cursor.execute.call_count == 4
+        # Verify the UPDATE query was called (third call)
         call_args = mock_cursor.execute.call_args_list[2]
         sql = call_args[0][0]
         assert "UPDATE" in sql
-        assert "status = 'retry'" in sql
+        assert "status = 'retry'" in sql or "status = CASE" in sql  # Updated to use CASE
         assert "next_run_at" in sql
-        # Check that next_run_at is calculated correctly
-        assert call_args[0][1][1] == 456  # event_id
+        # Check that event_id is in parameters
+        assert 456 in call_args[0][1]
         mock_db_connection.commit.assert_called()
 
 
@@ -206,4 +209,37 @@ def test_repository_init_negative_retry_backoff():
     """Test that negative retry_backoff raises ValueError."""
     with pytest.raises(ValueError, match="retry_backoff_seconds must be non-negative"):
         OutboxRepository("host=localhost dbname=test", retry_backoff_seconds=-1)
+
+
+def test_mark_retry_exceeds_max_attempts(mock_db_connection, mock_cursor):
+    """Test that mark_retry marks event as 'dead' when max_attempts is exceeded."""
+    mock_cursor.rowcount = 1
+    mock_cursor.fetchone.return_value = ('dead',)  # Event marked as dead
+    
+    repo = OutboxRepository("host=localhost dbname=test", max_attempts=3)
+    
+    # Simulate event with attempts = 2 (next retry will be 3, which equals max_attempts)
+    # We need to mock the SQL to return the correct status
+    with patch("dispatchbox.repository.datetime") as mock_datetime:
+        mock_now = datetime.now(timezone.utc)
+        mock_datetime.now.return_value = mock_now
+        mock_datetime.timedelta = timedelta
+        mock_datetime.timezone = timezone
+        
+        repo.mark_retry(789)
+        
+        # Verify UPDATE was called with CASE statement
+        assert mock_cursor.execute.call_count == 4
+        call_args = mock_cursor.execute.call_args_list[2]
+        sql = call_args[0][0]
+        assert "UPDATE" in sql
+        assert "CASE" in sql  # Should use CASE to check max_attempts
+        assert "dead" in sql
+        mock_db_connection.commit.assert_called()
+
+
+def test_repository_init_invalid_max_attempts():
+    """Test that max_attempts < 1 raises ValueError."""
+    with pytest.raises(ValueError, match="max_attempts must be at least 1"):
+        OutboxRepository("host=localhost dbname=test", max_attempts=0)
 
