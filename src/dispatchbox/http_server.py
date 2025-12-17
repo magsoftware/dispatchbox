@@ -36,6 +36,7 @@ class HttpServer:
         self.repository_fn: Optional[Callable[[], Any]] = repository_fn
         self.app: Bottle = Bottle()
         self._setup_routes()
+        self._setup_error_handlers()
         self._server_thread: Optional[threading.Thread] = None
         self._shutdown_event = threading.Event()
 
@@ -53,6 +54,29 @@ class HttpServer:
             self.app.get("/api/dead-events/<event_id:int>")(self._get_dead_event)
             self.app.post("/api/dead-events/<event_id:int>/retry")(self._retry_dead_event)
             self.app.post("/api/dead-events/retry-batch")(self._retry_dead_events_batch)
+
+    def _setup_error_handlers(self) -> None:
+        """Setup error handlers for JSON responses."""
+        @self.app.error(404)
+        def error_404(error):
+            """Handle 404 Not Found errors with JSON response."""
+            response.content_type = "application/json"
+            response.status = 404
+            return json.dumps({"error": "Not Found", "message": "The requested resource was not found"})
+        
+        @self.app.error(405)
+        def error_405(error):
+            """Handle 405 Method Not Allowed errors with JSON response."""
+            response.content_type = "application/json"
+            response.status = 405
+            return json.dumps({"error": "Method Not Allowed", "message": "The HTTP method is not allowed for this resource"})
+        
+        @self.app.error(500)
+        def error_500(error):
+            """Handle 500 Internal Server Error with JSON response."""
+            response.content_type = "application/json"
+            response.status = 500
+            return json.dumps({"error": "Internal Server Error", "message": "An internal server error occurred"})
 
     def _health(self) -> dict:
         """

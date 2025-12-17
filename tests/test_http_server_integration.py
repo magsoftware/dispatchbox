@@ -548,23 +548,43 @@ class TestErrorHandling:
         response = requests.get(f"{base_url}/api/dead-events", timeout=1)
         
         assert response.status_code == 500
+        assert response.headers.get("Content-Type") == "application/json"
         assert "error" in response.json()
-        assert "Internal server error" in response.json()["error"]
+        assert "Internal Server Error" in response.json()["error"]
     
     def test_not_found_endpoint(self, http_server):
-        """Test accessing non-existent endpoint returns 404."""
+        """Test accessing non-existent endpoint returns 404 with JSON."""
         server, mock_repo, base_url = http_server
         
         response = requests.get(f"{base_url}/api/nonexistent", timeout=1)
         
         assert response.status_code == 404
+        assert response.headers.get("Content-Type") == "application/json"
+        assert "error" in response.json()
+        assert response.json()["error"] == "Not Found"
+        assert "message" in response.json()
+    
+    def test_not_found_simple_path(self, http_server):
+        """Test accessing simple non-existent path returns 404 with JSON."""
+        server, mock_repo, base_url = http_server
+        
+        response = requests.get(f"{base_url}/x", timeout=1)
+        
+        assert response.status_code == 404
+        assert response.headers.get("Content-Type") == "application/json"
+        assert "error" in response.json()
+        assert response.json()["error"] == "Not Found"
     
     def test_method_not_allowed(self, http_server):
-        """Test using wrong HTTP method returns 405."""
+        """Test using wrong HTTP method returns 405 with JSON."""
         server, mock_repo, base_url = http_server
         
         # POST to GET-only endpoint
         response = requests.post(f"{base_url}/api/dead-events/stats", timeout=1)
         
         assert response.status_code == 405
+        assert response.headers.get("Content-Type") == "application/json"
+        assert "error" in response.json()
+        assert response.json()["error"] == "Method Not Allowed"
+        assert "message" in response.json()
 
