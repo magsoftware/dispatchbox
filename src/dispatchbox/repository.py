@@ -15,7 +15,14 @@ from dispatchbox.config import DEFAULT_MAX_ATTEMPTS
 class OutboxRepository:
     """Repository for managing outbox events in the database."""
 
-    def __init__(self, dsn: str, retry_backoff_seconds: int = 30, connect_timeout: int = 10, query_timeout: int = 30, max_attempts: int = DEFAULT_MAX_ATTEMPTS) -> None:
+    def __init__(
+        self,
+        dsn: str,
+        retry_backoff_seconds: int = 30,
+        connect_timeout: int = 10,
+        query_timeout: int = 30,
+        max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    ) -> None:
         """
         Initialize OutboxRepository.
 
@@ -24,12 +31,14 @@ class OutboxRepository:
             retry_backoff_seconds: Seconds to wait before retrying failed events
             connect_timeout: Connection timeout in seconds (default: 10)
             query_timeout: Query timeout in seconds (default: 30)
-            max_attempts: Maximum number of retry attempts before marking event as dead (default: 5)
+            max_attempts: Maximum number of retry attempts before marking event
+                as dead (default: 5)
 
         Raises:
             ValueError: If DSN is empty or invalid
             psycopg2.OperationalError: If connection cannot be established
         """
+        # Validate DSN
         if not dsn or not dsn.strip():
             raise ValueError("DSN cannot be empty")
         
@@ -38,6 +47,7 @@ class OutboxRepository:
         self.query_timeout: int = query_timeout
         self.max_attempts: int = max_attempts
         
+        # Validate parameters
         if retry_backoff_seconds < 0:
             raise ValueError("retry_backoff_seconds must be non-negative")
         if connect_timeout < 0:
@@ -53,6 +63,7 @@ class OutboxRepository:
             separator = "&" if "?" in dsn_with_timeout else " "
             dsn_with_timeout = f"{dsn_with_timeout}{separator}connect_timeout={connect_timeout}"
         
+        # Establish database connection
         try:
             self.conn: Any = psycopg2.connect(dsn_with_timeout)
             self.conn.autocommit = False
