@@ -5,34 +5,41 @@ from unittest.mock import patch, MagicMock
 from dispatchbox.handlers import send_email, push_to_crm, record_analytics, HANDLERS
 
 
-def test_send_email(sample_payload, capsys):
+def test_send_email(sample_payload):
     """Test send_email handler."""
     with patch("dispatchbox.handlers.time.sleep"):
-        send_email(sample_payload)
-    
-    captured = capsys.readouterr()
-    assert "[send_email] email sent to" in captured.out
-    assert "C001" in captured.out
+        with patch("dispatchbox.handlers.logger") as mock_logger:
+            send_email(sample_payload)
+            mock_logger.info.assert_called_once()
+            # Loguru uses format string and arguments
+            format_str = mock_logger.info.call_args[0][0]
+            args = mock_logger.info.call_args[0][1:]
+            assert "Email sent to customer" in format_str
+            assert "C001" in str(args)
 
 
-def test_push_to_crm(sample_payload, capsys):
+def test_push_to_crm(sample_payload):
     """Test push_to_crm handler."""
     with patch("dispatchbox.handlers.time.sleep"):
-        push_to_crm(sample_payload)
-    
-    captured = capsys.readouterr()
-    assert "[push_to_crm] CRM updated for order" in captured.out
-    assert "12345" in captured.out
+        with patch("dispatchbox.handlers.logger") as mock_logger:
+            push_to_crm(sample_payload)
+            mock_logger.info.assert_called_once()
+            format_str = mock_logger.info.call_args[0][0]
+            args = mock_logger.info.call_args[0][1:]
+            assert "CRM updated for order" in format_str
+            assert "12345" in str(args)
 
 
-def test_record_analytics(sample_payload, capsys):
+def test_record_analytics(sample_payload):
     """Test record_analytics handler."""
     with patch("dispatchbox.handlers.time.sleep"):
-        record_analytics(sample_payload)
-    
-    captured = capsys.readouterr()
-    assert "[record_analytics] analytics recorded for order" in captured.out
-    assert "12345" in captured.out
+        with patch("dispatchbox.handlers.logger") as mock_logger:
+            record_analytics(sample_payload)
+            mock_logger.info.assert_called_once()
+            format_str = mock_logger.info.call_args[0][0]
+            args = mock_logger.info.call_args[0][1:]
+            assert "Analytics recorded for order" in format_str
+            assert "12345" in str(args)
 
 
 def test_send_email_sleeps():

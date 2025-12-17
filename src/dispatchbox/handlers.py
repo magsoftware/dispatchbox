@@ -3,24 +3,25 @@
 
 import time
 from typing import Callable, Dict, Any
+from loguru import logger
 
 
 def send_email(payload: Dict[str, Any]) -> None:
     """Send email notification."""
     time.sleep(0.2)
-    print(f"[send_email] email sent to {payload['customerId']}")
+    logger.info("Email sent to customer {}", payload.get('customerId', 'unknown'))
 
 
 def push_to_crm(payload: Dict[str, Any]) -> None:
     """Push data to CRM system."""
     time.sleep(0.1)
-    print(f"[push_to_crm] CRM updated for order {payload['orderId']}")
+    logger.info("CRM updated for order {}", payload.get('orderId', 'unknown'))
 
 
 def record_analytics(payload: Dict[str, Any]) -> None:
     """Record analytics data."""
     time.sleep(0.05)
-    print(f"[record_analytics] analytics recorded for order {payload['orderId']}")
+    logger.info("Analytics recorded for order {}", payload.get('orderId', 'unknown'))
 
 
 # Registry of event handlers
