@@ -183,26 +183,38 @@ uv run pytest -v
 ```
 outbox/
 ├── src/
-│   └── dispatchbox/      # Main package
-│       ├── cli.py        # Command-line interface
-│       ├── config.py     # Configuration constants
-│       ├── handlers.py   # Event handlers
-│       ├── models.py     # Data models (OutboxEvent)
-│       ├── repository.py # Database repository
-│       ├── supervisor.py # Process supervision
-│       ├── worker.py     # Worker implementation
-│       └── http_server.py # HTTP server for health checks and API
-├── tests/                # Test suite
-├── scripts/              # Utility scripts
+│   └── dispatchbox/           # Main package
+│       ├── __init__.py
+│       ├── cli.py             # Command-line interface
+│       ├── config.py           # Configuration constants
+│       ├── handlers.py        # Event handlers
+│       ├── http_server.py     # HTTP server for health checks and API
+│       ├── models.py          # Data models (OutboxEvent)
+│       ├── repository.py      # Database repository
+│       ├── supervisor.py      # Process supervision
+│       └── worker.py          # Worker implementation
+├── tests/                     # Test suite
+│   ├── conftest.py
+│   ├── test_handlers.py
+│   ├── test_http_server.py
+│   ├── test_models.py
+│   ├── test_repository.py
+│   ├── test_supervisor.py
+│   └── test_worker.py
+├── scripts/                   # Utility scripts
 │   ├── generate_outbox_db.py
 │   └── generate_outbox_sql.py
-├── sql/                  # SQL scripts
+├── sql/                       # SQL scripts
 │   ├── schema.sql
 │   └── insert_outbox.sql
-└── docs/                 # Documentation
-    ├── plans/            # Development plans
-    ├── IMPROVEMENTS.md   # Improvement proposals
-    └── DEAD_LETTER_QUEUE.md  # Dead Letter Queue documentation
+├── docs/                      # Documentation
+│   ├── DEAD_LETTER_QUEUE.md   # Dead Letter Queue documentation
+│   ├── HTTP_FRAMEWORK_ANALYSIS.md  # HTTP framework analysis
+│   ├── IMPROVEMENTS.md        # Improvement proposals
+│   └── SQL_QUERY_BUILDER_ANALYSIS.md  # SQL query builder analysis
+├── pyproject.toml             # Project configuration
+├── uv.lock                    # Dependency lock file
+└── README.md                  # This file
 ```
 
 ## How It Works
