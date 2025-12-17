@@ -8,8 +8,13 @@ Event handlers currently receive only the event `payload` and have no access to 
 
 - **Worker processes**: Each has one dedicated long-lived database connection
 - **Handler execution**: Handlers run in separate threads within the worker process
+- **Handler database access**: **Handlers do NOT have access to the database** - they only receive the event `payload`
+- **Worker database operations**: Worker uses its connection for:
+  - Fetching events (`fetch_pending`)
+  - Marking events as successful (`mark_success`) - **after** handler completes
+  - Marking events for retry (`mark_retry`) - **after** handler fails
 - **Transaction isolation**: Worker's connection uses manual transactions (`autocommit = False`)
-- **Concurrency**: Multiple handlers can run in parallel threads, but share the worker's connection
+- **Concurrency**: Multiple handlers run in parallel threads, but they are **completely isolated** - they have no shared state, no database access, and no access to worker's connection
 
 ## Option 1: Handler Creates Own Connection
 
@@ -198,9 +203,13 @@ handler(payload, repository=self.repository)
 - ❌ **Transaction boundaries**: Can't have independent transactions
 - ❌ **Deadlock risk**: High risk of deadlocks and race conditions
 - ❌ **Violates isolation**: Handler operations affect worker's transaction state
+- ❌ **Worker interference**: Handler operations could interfere with worker's `mark_success`/`mark_retry` operations
 
 ### Verdict
-**DO NOT USE** - This is a recipe for disaster. Database connections are not thread-safe for concurrent use.
+**DO NOT USE** - This is a recipe for disaster. Database connections are not thread-safe for concurrent use. Additionally, the worker needs exclusive access to its connection for managing event lifecycle (marking success/retry).
+
+### Current Reality
+**This option is NOT currently implemented** - handlers have no database access at all. The worker's connection is used exclusively by the worker thread for event lifecycle management, not by handler threads.
 
 ---
 
