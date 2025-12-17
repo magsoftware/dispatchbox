@@ -147,6 +147,25 @@ class HttpServer:
         """
         return self._server_thread is not None and self._server_thread.is_alive()
 
+    def _parse_list_dead_events_params(self) -> dict:
+        """
+        Parse and validate query parameters for listing dead events.
+
+        Returns:
+            Dictionary with parsed parameters (limit, offset, aggregate_type, event_type)
+        """
+        limit = min(int(request.query.get("limit", 100)), 1000)
+        offset = int(request.query.get("offset", 0))
+        aggregate_type = request.query.get("aggregate_type") or None
+        event_type = request.query.get("event_type") or None
+        
+        return {
+            "limit": limit,
+            "offset": offset,
+            "aggregate_type": aggregate_type,
+            "event_type": event_type,
+        }
+
     def _list_dead_events(self) -> dict:
         """
         List dead events with optional filtering and pagination.
@@ -165,24 +184,21 @@ class HttpServer:
             return {"error": "Repository not available"}
 
         try:
+            params = self._parse_list_dead_events_params()
             repo = self.repository_fn()
-            limit = min(int(request.query.get("limit", 100)), 1000)
-            offset = int(request.query.get("offset", 0))
-            aggregate_type = request.query.get("aggregate_type") or None
-            event_type = request.query.get("event_type") or None
-
+            
             events = repo.fetch_dead_events(
-                limit=limit,
-                offset=offset,
-                aggregate_type=aggregate_type,
-                event_type=event_type,
+                limit=params["limit"],
+                offset=params["offset"],
+                aggregate_type=params["aggregate_type"],
+                event_type=params["event_type"],
             )
 
             return {
                 "events": [event.to_dict() for event in events],
                 "count": len(events),
-                "limit": limit,
-                "offset": offset,
+                "limit": params["limit"],
+                "offset": params["offset"],
             }
         except ValueError as e:
             response.status = 400
@@ -191,6 +207,18 @@ class HttpServer:
             logger.error("Error listing dead events: {}", e)
             response.status = 500
             return {"error": "Internal server error"}
+
+    def _parse_stats_params(self) -> dict:
+        """
+        Parse query parameters for stats endpoint.
+
+        Returns:
+            Dictionary with parsed parameters (aggregate_type, event_type)
+        """
+        return {
+            "aggregate_type": request.query.get("aggregate_type") or None,
+            "event_type": request.query.get("event_type") or None,
+        }
 
     def _dead_events_stats(self) -> dict:
         """
@@ -208,19 +236,18 @@ class HttpServer:
             return {"error": "Repository not available"}
 
         try:
+            params = self._parse_stats_params()
             repo = self.repository_fn()
-            aggregate_type = request.query.get("aggregate_type") or None
-            event_type = request.query.get("event_type") or None
-
+            
             total = repo.count_dead_events(
-                aggregate_type=aggregate_type,
-                event_type=event_type,
+                aggregate_type=params["aggregate_type"],
+                event_type=params["event_type"],
             )
 
             return {
                 "total": total,
-                "aggregate_type": aggregate_type,
-                "event_type": event_type,
+                "aggregate_type": params["aggregate_type"],
+                "event_type": params["event_type"],
             }
         except Exception as e:
             logger.error("Error getting dead events stats: {}", e)
@@ -289,6 +316,40 @@ class HttpServer:
             response.status = 500
             return {"error": "Internal server error"}
 
+    def _parse_json_body(self) -> dict:
+        """
+        Parse JSON from request body.
+
+        Returns:
+            Parsed JSON data as dictionary
+
+        Raises:
+            ValueError: If JSON is invalid or cannot be parsed
+        """
+        try:
+            # request.body is a file-like object in Bottle
+            body_bytes = request.body.read() if hasattr(request.body, 'read') else request.body
+            if isinstance(body_bytes, bytes):
+                body_str = body_bytes.decode('utf-8')
+            else:
+                body_str = str(body_bytes)
+            return json.loads(body_str)
+        except (json.JSONDecodeError, AttributeError, UnicodeDecodeError) as e:
+            raise ValueError("Invalid JSON in request body") from e
+
+    def _validate_event_ids(self, event_ids: Any) -> None:
+        """
+        Validate event_ids from request.
+
+        Args:
+            event_ids: Event IDs to validate
+
+        Raises:
+            ValueError: If event_ids is invalid
+        """
+        if not isinstance(event_ids, list) or not event_ids:
+            raise ValueError("event_ids must be a non-empty list")
+
     def _retry_dead_events_batch(self) -> dict:
         """
         Retry multiple dead events (reset to pending).
@@ -306,23 +367,9 @@ class HttpServer:
             return {"error": "Repository not available"}
 
         try:
-            # Parse JSON body
-            try:
-                # request.body is a file-like object in Bottle
-                body_bytes = request.body.read() if hasattr(request.body, 'read') else request.body
-                if isinstance(body_bytes, bytes):
-                    body_str = body_bytes.decode('utf-8')
-                else:
-                    body_str = str(body_bytes)
-                data = json.loads(body_str)
-            except (json.JSONDecodeError, AttributeError, UnicodeDecodeError) as e:
-                response.status = 400
-                return {"error": "Invalid JSON in request body"}
-
+            data = self._parse_json_body()
             event_ids = data.get("event_ids", [])
-            if not isinstance(event_ids, list) or not event_ids:
-                response.status = 400
-                return {"error": "event_ids must be a non-empty list"}
+            self._validate_event_ids(event_ids)
 
             repo = self.repository_fn()
             count = repo.retry_dead_events_batch(event_ids)
