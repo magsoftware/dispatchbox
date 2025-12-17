@@ -14,6 +14,7 @@ Dispatchbox is a high-performance outbox pattern worker for PostgreSQL. It proce
 - Configurable timeouts (connection and query)
 - Graceful shutdown with signal handling (SIGTERM/SIGINT)
 - Structured logging with loguru and worker identification
+- HTTP server for health checks, metrics, and API endpoints
 - Configurable batch size and polling interval
 
 ## Requirements
@@ -105,7 +106,16 @@ dispatchbox \
   --processes 4 \
   --batch-size 20 \
   --poll-interval 0.5 \
-  --log-level DEBUG
+  --log-level DEBUG \
+  --http-port 8080
+```
+
+### Disable HTTP server
+
+```bash
+dispatchbox \
+  --dsn "host=localhost port=5432 dbname=outbox user=postgres password=postgres" \
+  --disable-http
 ```
 
 ### Using Python module
@@ -122,6 +132,9 @@ python -m dispatchbox.cli \
 - `--batch-size`: Events to fetch per batch (default: 10)
 - `--poll-interval`: Seconds to sleep when no work (default: 1.0)
 - `--log-level`: Logging level - DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
+- `--http-host`: HTTP server host (default: 0.0.0.0)
+- `--http-port`: HTTP server port for health checks and metrics (default: 8080)
+- `--disable-http`: Disable HTTP server
 
 ### Configuration defaults
 
@@ -130,6 +143,8 @@ python -m dispatchbox.cli \
 - `connect_timeout`: Database connection timeout in seconds (default: 10)
 - `query_timeout`: Database query timeout in seconds (default: 30)
 - `max_parallel`: Maximum parallel threads per worker process (default: 10)
+- `http_host`: HTTP server host (default: 0.0.0.0)
+- `http_port`: HTTP server port (default: 8080)
 
 ## Running Tests
 
@@ -175,7 +190,8 @@ outbox/
 │       ├── models.py     # Data models (OutboxEvent)
 │       ├── repository.py # Database repository
 │       ├── supervisor.py # Process supervision
-│       └── worker.py     # Worker implementation
+│       ├── worker.py     # Worker implementation
+│       └── http_server.py # HTTP server for health checks and API
 ├── tests/                # Test suite
 ├── scripts/              # Utility scripts
 │   ├── generate_outbox_db.py
@@ -211,6 +227,38 @@ Events that exceed the maximum retry attempts are marked as `dead` and stored in
 - Manually retry after fixing underlying issues
 
 See [Dead Letter Queue documentation](docs/DEAD_LETTER_QUEUE.md) for details on current implementation and future enhancements.
+
+## HTTP Endpoints
+
+Dispatchbox includes an HTTP server (enabled by default) that provides:
+
+### Health Checks
+
+- **`GET /health`** - Liveness probe
+  - Returns: `{"status": "ok"}`
+  - Status: `200 OK`
+  - Use for: Kubernetes liveness probes
+
+- **`GET /ready`** - Readiness probe
+  - Returns: `{"status": "ready"}` or `{"status": "not ready", "reason": "..."}`
+  - Status: `200 OK` (ready) or `503 Service Unavailable` (not ready)
+  - Checks: Database connectivity
+  - Use for: Kubernetes readiness probes
+
+### Metrics
+
+- **`GET /metrics`** - Prometheus metrics endpoint
+  - Returns: Prometheus metrics in text format
+  - Content-Type: `text/plain; version=0.0.4; charset=utf-8`
+  - Status: `200 OK` (if metrics available) or `501 Not Implemented` (if not configured)
+  - Use for: Prometheus scraping
+
+### Configuration
+
+The HTTP server runs in a background thread and doesn't block worker processes. It can be:
+- Configured via `--http-host` and `--http-port` CLI options
+- Disabled with `--disable-http` flag
+- Used for Kubernetes health checks and monitoring
 
 ## Event Handlers
 
