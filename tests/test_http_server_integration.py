@@ -550,7 +550,8 @@ class TestErrorHandling:
         assert response.status_code == 500
         assert response.headers.get("Content-Type") == "application/json"
         assert "error" in response.json()
-        assert "Internal Server Error" in response.json()["error"]
+        # The endpoint handler returns "Internal server error" (lowercase)
+        assert "Internal server error" in response.json()["error"]
     
     def test_not_found_endpoint(self, http_server):
         """Test accessing non-existent endpoint returns 404 with JSON."""
