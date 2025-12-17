@@ -78,8 +78,8 @@ def test_to_dict_with_all_fields(sample_event):
     assert result["payload"] == {"orderId": "12345", "customerId": "C001", "totalCents": 5000}
     assert result["status"] == "pending"
     assert result["attempts"] == 0
-    assert isinstance(result["next_run_at"], datetime)
-    assert isinstance(result["created_at"], datetime)
+    assert isinstance(result["next_run_at"], str)  # ISO 8601 string for JSON serialization
+    assert isinstance(result["created_at"], str)  # ISO 8601 string for JSON serialization
 
 
 def test_to_dict_without_optional_fields(sample_event_dict_minimal):

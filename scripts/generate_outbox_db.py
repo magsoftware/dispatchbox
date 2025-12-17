@@ -11,8 +11,8 @@ fake = Faker()
 # Konfiguracja połączenia DB
 # -----------------------------
 DSN = "host=localhost port=5432 dbname=outbox user=postgres password=postgres"
-NUM_RECORDS = 10_000_000
-BATCH_SIZE = 1000
+NUM_RECORDS = 1000
+BATCH_SIZE = 100
 STATUSES = ['pending', 'retry', 'done', 'dead']
 
 # -----------------------------
