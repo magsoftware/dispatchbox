@@ -92,6 +92,84 @@ class OutboxRepository:
         WHERE id = ANY(%s) AND status = 'dead';
     """
 
+    def _validate_dsn(self, dsn: str) -> None:
+        """
+        Validate DSN is not empty.
+
+        Args:
+            dsn: PostgreSQL connection string
+
+        Raises:
+            ValueError: If DSN is empty or whitespace only
+        """
+        if not dsn or not dsn.strip():
+            raise ValueError("DSN cannot be empty")
+
+    def _validate_parameters(
+        self,
+        retry_backoff_seconds: int,
+        connect_timeout: int,
+        query_timeout: int,
+        max_attempts: int,
+    ) -> None:
+        """
+        Validate all initialization parameters.
+
+        Args:
+            retry_backoff_seconds: Seconds to wait before retrying failed events
+            connect_timeout: Connection timeout in seconds
+            query_timeout: Query timeout in seconds
+            max_attempts: Maximum number of retry attempts
+
+        Raises:
+            ValueError: If any parameter is invalid
+        """
+        if retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds must be non-negative")
+        if connect_timeout < 0:
+            raise ValueError("connect_timeout must be non-negative")
+        if query_timeout < 0:
+            raise ValueError("query_timeout must be non-negative")
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
+
+    def _add_connect_timeout_to_dsn(self, dsn: str, timeout: int) -> str:
+        """
+        Add connect_timeout to DSN if not present.
+
+        Args:
+            dsn: PostgreSQL connection string
+            timeout: Connection timeout in seconds
+
+        Returns:
+            DSN with connect_timeout parameter added if needed
+        """
+        if "connect_timeout" not in dsn:
+            separator = "&" if "?" in dsn else " "
+            return f"{dsn}{separator}connect_timeout={timeout}"
+        return dsn
+
+    def _establish_connection(self, dsn_with_timeout: str) -> Any:
+        """
+        Establish database connection.
+
+        Args:
+            dsn_with_timeout: PostgreSQL connection string with timeout
+
+        Returns:
+            Database connection object
+
+        Raises:
+            psycopg2.OperationalError: If connection cannot be established
+        """
+        try:
+            conn = psycopg2.connect(dsn_with_timeout)
+            conn.autocommit = False
+            return conn
+        except psycopg2.OperationalError as e:
+            logger.error("Failed to connect to database: {}", e)
+            raise
+
     def __init__(
         self,
         dsn: str,
@@ -115,38 +193,16 @@ class OutboxRepository:
             ValueError: If DSN is empty or invalid
             psycopg2.OperationalError: If connection cannot be established
         """
-        # Validate DSN
-        if not dsn or not dsn.strip():
-            raise ValueError("DSN cannot be empty")
+        self._validate_dsn(dsn)
+        self._validate_parameters(retry_backoff_seconds, connect_timeout, query_timeout, max_attempts)
         
         self.dsn: str = dsn.strip()
         self.retry_backoff: int = retry_backoff_seconds
         self.query_timeout: int = query_timeout
         self.max_attempts: int = max_attempts
         
-        # Validate parameters
-        if retry_backoff_seconds < 0:
-            raise ValueError("retry_backoff_seconds must be non-negative")
-        if connect_timeout < 0:
-            raise ValueError("connect_timeout must be non-negative")
-        if query_timeout < 0:
-            raise ValueError("query_timeout must be non-negative")
-        if max_attempts < 1:
-            raise ValueError("max_attempts must be at least 1")
-        
-        # Add connect_timeout to DSN if not already present
-        dsn_with_timeout = self.dsn
-        if "connect_timeout" not in dsn_with_timeout:
-            separator = "&" if "?" in dsn_with_timeout else " "
-            dsn_with_timeout = f"{dsn_with_timeout}{separator}connect_timeout={connect_timeout}"
-        
-        # Establish database connection
-        try:
-            self.conn: Any = psycopg2.connect(dsn_with_timeout)
-            self.conn.autocommit = False
-        except psycopg2.OperationalError as e:
-            logger.error("Failed to connect to database: {}", e)
-            raise
+        dsn_with_timeout = self._add_connect_timeout_to_dsn(self.dsn, connect_timeout)
+        self.conn: Any = self._establish_connection(dsn_with_timeout)
 
     def _set_query_timeout(self, cur: Any) -> None:
         """
@@ -172,6 +228,28 @@ class OutboxRepository:
         except (psycopg2.OperationalError, psycopg2.InterfaceError):
             return False
 
+    def _reconnect(self) -> None:
+        """
+        Reconnect to database after connection loss.
+
+        Raises:
+            psycopg2.OperationalError: If reconnection fails
+        """
+        logger.warning("Database connection lost, attempting to reconnect...")
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        
+        try:
+            # Reconnect with same timeout settings (default 10s for reconnect)
+            dsn_with_timeout = self._add_connect_timeout_to_dsn(self.dsn, 10)
+            self.conn = self._establish_connection(dsn_with_timeout)
+            logger.info("Database connection restored")
+        except psycopg2.OperationalError as e:
+            logger.error("Failed to reconnect to database: {}", e)
+            raise
+
     def _check_connection(self) -> None:
         """
         Check if database connection is alive and reconnect if needed.
@@ -184,25 +262,7 @@ class OutboxRepository:
             with self.conn.cursor() as cur:
                 cur.execute(self.CHECK_CONNECTION_SQL)
         except (psycopg2.OperationalError, psycopg2.InterfaceError):
-            logger.warning("Database connection lost, attempting to reconnect...")
-            try:
-                self.conn.close()
-            except Exception:
-                pass
-            
-            try:
-                # Reconnect with same timeout settings
-                dsn_with_timeout = self.dsn
-                if "connect_timeout" not in dsn_with_timeout:
-                    separator = "&" if "?" in dsn_with_timeout else " "
-                    dsn_with_timeout = f"{dsn_with_timeout}{separator}connect_timeout=10"
-                
-                self.conn = psycopg2.connect(dsn_with_timeout)
-                self.conn.autocommit = False
-                logger.info("Database connection restored")
-            except psycopg2.OperationalError as e:
-                logger.error("Failed to reconnect to database: {}", e)
-                raise
+            self._reconnect()
 
     def fetch_pending(self, batch_size: int) -> List[OutboxEvent]:
         """
@@ -244,6 +304,32 @@ class OutboxRepository:
             cur.execute(self.MARK_SUCCESS_SQL, (event_id,))
         self.conn.commit()
 
+    def _calculate_next_run_at(self) -> datetime:
+        """
+        Calculate next_run_at timestamp based on retry backoff.
+
+        Returns:
+            Datetime for next retry attempt
+        """
+        return datetime.now(timezone.utc) + timedelta(seconds=self.retry_backoff)
+
+    def _log_if_dead(self, event_id: int, cur: Any) -> None:
+        """
+        Check and log if event was marked as dead.
+
+        Args:
+            event_id: ID of the event to check
+            cur: Database cursor
+        """
+        cur.execute(self.CHECK_STATUS_SQL, (event_id,))
+        result = cur.fetchone()
+        if result and result[0] == 'dead':
+            logger.warning(
+                "Event {} exceeded max_attempts ({}), marked as dead",
+                event_id,
+                self.max_attempts,
+            )
+
     def mark_retry(self, event_id: int) -> None:
         """
         Mark an event for retry with updated next_run_at timestamp.
@@ -259,7 +345,7 @@ class OutboxRepository:
             raise ValueError("event_id must be a positive integer")
         
         self._check_connection()
-        next_run_at = datetime.now(timezone.utc) + timedelta(seconds=self.retry_backoff)
+        next_run_at = self._calculate_next_run_at()
         
         with self.conn.cursor() as cur:
             self._set_query_timeout(cur)
@@ -268,15 +354,7 @@ class OutboxRepository:
                 (self.max_attempts, self.max_attempts, next_run_at, event_id),
             )
             if cur.rowcount > 0:
-                # Log if event was marked as dead
-                cur.execute(self.CHECK_STATUS_SQL, (event_id,))
-                result = cur.fetchone()
-                if result and result[0] == 'dead':
-                    logger.warning(
-                        "Event {} exceeded max_attempts ({}), marked as dead",
-                        event_id,
-                        self.max_attempts,
-                    )
+                self._log_if_dead(event_id, cur)
         self.conn.commit()
 
     def close(self) -> None:
@@ -291,6 +369,36 @@ class OutboxRepository:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager exit."""
         self.close()
+
+    def _build_dead_events_sql(
+        self,
+        aggregate_type: Optional[str],
+        event_type: Optional[str],
+    ) -> tuple[str, List[Any]]:
+        """
+        Build SQL query and parameters for fetching dead events.
+
+        Args:
+            aggregate_type: Filter by aggregate type (optional)
+            event_type: Filter by event type (optional)
+
+        Returns:
+            Tuple of (SQL query string, parameters list)
+        """
+        sql = self.FETCH_DEAD_EVENTS_BASE_SQL
+        params: List[Any] = []
+        
+        if aggregate_type:
+            sql += " AND aggregate_type = %s"
+            params.append(aggregate_type)
+        
+        if event_type:
+            sql += " AND event_type = %s"
+            params.append(event_type)
+        
+        sql += self.FETCH_DEAD_EVENTS_ORDER_LIMIT_SQL
+        
+        return sql, params
 
     def fetch_dead_events(
         self,
@@ -318,8 +426,32 @@ class OutboxRepository:
 
         self._check_connection()
         
-        # Build SQL with optional filters using base constant
-        sql = self.FETCH_DEAD_EVENTS_BASE_SQL
+        sql, params = self._build_dead_events_sql(aggregate_type, event_type)
+        params.extend([limit, offset])
+        
+        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
+            self._set_query_timeout(cur)
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+            self.conn.commit()
+            return [OutboxEvent.from_dict(dict(row)) for row in rows]
+
+    def _build_count_dead_events_sql(
+        self,
+        aggregate_type: Optional[str],
+        event_type: Optional[str],
+    ) -> tuple[str, List[Any]]:
+        """
+        Build SQL query and parameters for counting dead events.
+
+        Args:
+            aggregate_type: Filter by aggregate type (optional)
+            event_type: Filter by event type (optional)
+
+        Returns:
+            Tuple of (SQL query string, parameters list)
+        """
+        sql = self.COUNT_DEAD_EVENTS_BASE_SQL
         params: List[Any] = []
         
         if aggregate_type:
@@ -330,15 +462,7 @@ class OutboxRepository:
             sql += " AND event_type = %s"
             params.append(event_type)
         
-        sql += self.FETCH_DEAD_EVENTS_ORDER_LIMIT_SQL
-        params.extend([limit, offset])
-        
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            self._set_query_timeout(cur)
-            cur.execute(sql, tuple(params))
-            rows = cur.fetchall()
-            self.conn.commit()
-            return [OutboxEvent.from_dict(dict(row)) for row in rows]
+        return sql, params
 
     def count_dead_events(
         self,
@@ -357,17 +481,7 @@ class OutboxRepository:
         """
         self._check_connection()
         
-        # Build SQL with optional filters using base constant
-        sql = self.COUNT_DEAD_EVENTS_BASE_SQL
-        params: List[Any] = []
-        
-        if aggregate_type:
-            sql += " AND aggregate_type = %s"
-            params.append(aggregate_type)
-        
-        if event_type:
-            sql += " AND event_type = %s"
-            params.append(event_type)
+        sql, params = self._build_count_dead_events_sql(aggregate_type, event_type)
         
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             self._set_query_timeout(cur)
