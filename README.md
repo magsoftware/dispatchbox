@@ -304,6 +304,33 @@ outbox/
 - **Database-level**: PostgreSQL's row-level locking (`FOR UPDATE SKIP LOCKED`) ensures no conflicts
 - All threads in a process share the same connection, but operations are serialized through transactions
 
+**Additional Database Connections:**
+
+Besides worker processes, database connections are also used by:
+
+1. **HTTP Server - Readiness Probe (`/ready` endpoint)**:
+   - Creates a **short-lived connection** for each readiness check request
+   - Uses `OutboxRepository.is_connected()` to verify database connectivity
+   - Connection is created, checked, and immediately closed
+   - Timeout: 2 seconds (connection) and 2 seconds (query)
+
+2. **HTTP Server - Dead Letter Queue API endpoints**:
+   - Creates a **new connection per request** for DLQ operations:
+     - `GET /api/dead-events` - List dead events
+     - `GET /api/dead-events/stats` - Get statistics
+     - `GET /api/dead-events/<id>` - Get single dead event
+     - `POST /api/dead-events/<id>/retry` - Retry single event
+     - `POST /api/dead-events/retry-batch` - Retry multiple events
+   - Each request creates a fresh `OutboxRepository` instance
+   - Connection is closed after the request completes
+   - Timeout: 2 seconds (connection) and 5 seconds (query)
+   - This ensures API requests don't interfere with worker processing
+
+**Connection Lifecycle Summary:**
+- **Worker processes**: Long-lived connections (one per process, lifetime = process lifetime)
+- **HTTP readiness checks**: Short-lived connections (created and closed per request)
+- **HTTP DLQ API**: Short-lived connections (created and closed per request)
+
 ## Dead Letter Queue
 
 Events that exceed the maximum retry attempts are marked as `dead` and stored in the database. These events are not automatically processed anymore, allowing you to:
