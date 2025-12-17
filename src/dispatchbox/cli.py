@@ -7,7 +7,7 @@ from typing import Optional
 from loguru import logger
 
 from dispatchbox.supervisor import start_processes
-from dispatchbox.http_server import HealthServer
+from dispatchbox.http_server import HttpServer
 from dispatchbox.repository import OutboxRepository
 from dispatchbox.config import (
     DEFAULT_BATCH_SIZE,
@@ -115,8 +115,8 @@ def main() -> None:
         args.poll_interval
     )
 
-    # Start HTTP server for health checks (if enabled)
-    http_server: Optional[HealthServer] = None
+    # Start HTTP server for health checks, metrics, and API (if enabled)
+    http_server: Optional[HttpServer] = None
     if not args.disable_http:
         # Create a test repository to check DB connectivity
         def check_db() -> bool:
@@ -128,7 +128,7 @@ def main() -> None:
             except Exception:
                 return False
 
-        http_server = HealthServer(
+        http_server = HttpServer(
             host=args.http_host,
             port=args.http_port,
             db_check_fn=check_db,

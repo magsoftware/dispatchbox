@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HTTP server for health checks and metrics."""
+"""HTTP server for health checks, metrics, and API endpoints."""
 
 import threading
 from typing import Optional, Callable
@@ -7,8 +7,8 @@ from bottle import Bottle, run, response, request
 from loguru import logger
 
 
-class HealthServer:
-    """HTTP server for health checks and metrics."""
+class HttpServer:
+    """HTTP server for health checks, metrics, and API endpoints."""
 
     def __init__(
         self,
@@ -18,7 +18,7 @@ class HealthServer:
         metrics_fn: Optional[Callable[[], str]] = None,
     ) -> None:
         """
-        Initialize health check server.
+        Initialize HTTP server.
 
         Args:
             host: Host to bind to (default: 0.0.0.0)
@@ -117,7 +117,7 @@ class HealthServer:
 
         self._server_thread = threading.Thread(target=_run_server, daemon=daemon)
         self._server_thread.start()
-        logger.info("HTTP server started on {}:{}", self.host, self.port)
+        logger.info("HTTP server started on {}:{} (endpoints: /health, /ready, /metrics)", self.host, self.port)
 
     def stop(self) -> None:
         """Stop HTTP server."""
