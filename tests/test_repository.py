@@ -177,3 +177,21 @@ def test_context_manager_exception_handling(mock_db_connection):
     
     mock_db_connection.close.assert_called_once()
 
+
+def test_repository_init_empty_dsn():
+    """Test that empty DSN raises ValueError."""
+    with pytest.raises(ValueError, match="DSN cannot be empty"):
+        OutboxRepository("")
+
+
+def test_repository_init_whitespace_only_dsn():
+    """Test that whitespace-only DSN raises ValueError."""
+    with pytest.raises(ValueError, match="DSN cannot be empty"):
+        OutboxRepository("   ")
+
+
+def test_repository_init_negative_retry_backoff():
+    """Test that negative retry_backoff raises ValueError."""
+    with pytest.raises(ValueError, match="retry_backoff_seconds must be non-negative"):
+        OutboxRepository("host=localhost dbname=test", retry_backoff_seconds=-1)
+

@@ -21,11 +21,26 @@ class OutboxRepository:
         Args:
             dsn: PostgreSQL connection string
             retry_backoff_seconds: Seconds to wait before retrying failed events
+
+        Raises:
+            ValueError: If DSN is empty or invalid
+            psycopg2.OperationalError: If connection cannot be established
         """
-        self.dsn: str = dsn
+        if not dsn or not dsn.strip():
+            raise ValueError("DSN cannot be empty")
+        
+        self.dsn: str = dsn.strip()
         self.retry_backoff: int = retry_backoff_seconds
-        self.conn: Any = psycopg2.connect(self.dsn)
-        self.conn.autocommit = False
+        
+        if retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds must be non-negative")
+        
+        try:
+            self.conn: Any = psycopg2.connect(self.dsn)
+            self.conn.autocommit = False
+        except psycopg2.OperationalError as e:
+            logger.error("Failed to connect to database: {}", e)
+            raise
 
     def fetch_pending(self, batch_size: int) -> List[OutboxEvent]:
         """
