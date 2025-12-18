@@ -259,6 +259,44 @@ outbox/
 
 ## How It Works
 
+### High-Level Architecture With Client
+
+Below is a high-level **architecture diagram** showing how a client application uses the
+transactional outbox pattern with Dispatchbox. The client performs a business operation and
+persists both domain data and an outbox event **in a single database transaction**, while
+Dispatchbox asynchronously picks up and processes these events.
+
+```mermaid
+flowchart LR
+    subgraph ClientApp["Client Application (e.g. Order Service)"]
+        U[User / API] --> Svc[OrderService / CheckoutService]
+        Svc -->|BEGIN TRANSACTION| DB[(PostgreSQL)]
+        DB <-->|Domain tables<br/>e.g. orders, payments| BizTables
+        DB <-->|Outbox table| OutboxTable[Outbox]
+        Svc -->|INSERT business data + INSERT outbox<br/>in one transaction| BizTables
+        Svc -->|INSERT event into outbox<br/>in same transaction| OutboxTable
+        Svc -->|COMMIT| DB
+    end
+
+    subgraph Dispatchbox["Dispatchbox"]
+        CLI[CLI / Supervisor] --> W1[Worker Process 1]
+        CLI --> W2[Worker Process N]
+
+        subgraph Worker["Worker (per process)"]
+            Repo[OutboxRepository] -->|SELECT ... FOR UPDATE SKIP LOCKED| OutboxTable
+            Repo -->|UPDATE status, attempts,...| OutboxTable
+            Repo --> H[Handlers]
+        end
+    end
+
+    H --> Ext1[External System A<br/>(e.g. invoicing)]
+    H --> Ext2[External System B<br/>(e.g. notifications)]
+
+    style OutboxTable fill:#ffe0b2,stroke:#cc7a00,stroke-width:2px
+    style BizTables fill:#e0f7fa,stroke:#00796b,stroke-width:1px
+    style Worker stroke:#1976d2,stroke-width:2px
+```
+
 ### Architecture Overview
 
 1. **Multiple worker processes** are started, each with its own database connection
@@ -270,6 +308,56 @@ outbox/
 7. On failure, events are marked as `retry` with updated `next_run_at` and incremented attempts
 8. After `max_attempts` (default: 5), events are marked as `dead` and moved to Dead Letter Queue
 9. Dead events are logged with warnings and can be reviewed/manually retried (see [Dead Letter Queue docs](docs/DEAD_LETTER_QUEUE.md))
+
+### End-to-End Sequence From Client To Dispatchbox
+
+The following **sequence diagram** shows an example `checkout` call that stores domain data and
+an outbox event within a single transaction, followed by Dispatchbox processing that event and
+calling an external system.
+
+```mermaid
+sequenceDiagram
+    participant User as User / API Client
+    participant App as Client App<br/>(OrderService)
+    participant DB as PostgreSQL
+    participant Outbox as Outbox table
+    participant DBox as Dispatchbox Worker
+    participant H as Event Handler
+    participant Ext as External System<br/>(e.g. Billing / Notifications)
+
+    User->>App: POST /checkout (order data)
+    activate App
+
+    App->>DB: BEGIN TRANSACTION
+    App->>DB: INSERT INTO orders (...)
+    App->>DB: INSERT INTO payments (...)
+    App->>Outbox: INSERT INTO outbox<br/>(aggregate_type, event_type, payload, ...)
+    App->>DB: COMMIT
+    deactivate App
+
+    Note over DB,Outbox: Domain data + outbox event<br/>committed atomically
+
+    loop Every poll_interval seconds
+        DBox->>Outbox: SELECT ... FOR UPDATE SKIP LOCKED<br/>WHERE status IN (pending, retry)
+        Note right of DBox: Fetch batch of events
+    end
+
+    DBox->>DBox: Deserialize event into model
+    DBox->>H: Call handler<br/>e.g. handle_order_placed(payload)
+    activate H
+
+    H->>Ext: HTTP call / publish to queue
+    Ext-->>H: Response / acknowledgement
+    deactivate H
+
+    DBox->>Outbox: UPDATE outbox SET status='done', ...<br/>WHERE id = event_id
+
+    alt Handler or integration error
+        DBox->>Outbox: UPDATE outbox SET status='retry',<br/>attempts=attempts+1,<br/>next_run_at = now() + backoff
+        Note right of DBox: After max_attempts<br/>status='dead' (DLQ)
+    end
+```
+
 
 ### Database Connection Management
 
