@@ -1,6 +1,10 @@
-import psycopg2
+"""Generate sample outbox events directly into the database."""
+
 import json
+
+import psycopg2
 from psycopg2.extras import execute_values
+
 from outbox_generator import STATUSES, generate_event
 
 DSN = "host=localhost port=5432 dbname=outbox user=postgres password=postgres"
@@ -8,6 +12,7 @@ NUM_RECORDS = 1000
 BATCH_SIZE = 100
 
 def generate_record(index):
+    """Generate a single row tuple for bulk insert into outbox_event."""
     event = generate_event(index, STATUSES)
     return (
         event["aggregate_type"],
@@ -33,7 +38,7 @@ with psycopg2.connect(DSN) as conn:
                 VALUES %s
                 """,
                 batch,
-                template="(%s,%s,%s,%s::jsonb,%s,%s,%s)"
+                template="(%s,%s,%s,%s::jsonb,%s,%s,%s)",
             )
 
             conn.commit()
@@ -41,4 +46,3 @@ with psycopg2.connect(DSN) as conn:
                 print(f"Inserted {batch_start - 1} records...")
 
 print("Finished inserting all records!")
-

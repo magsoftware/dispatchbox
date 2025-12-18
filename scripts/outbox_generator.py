@@ -1,3 +1,5 @@
+"""Helpers for generating demo outbox events for scripts and tests."""
+
 import random
 from datetime import datetime, timedelta, timezone
 
@@ -55,6 +57,3 @@ def generate_event(index: int, statuses=None):
         "next_run_at": next_run_at,
         "next_run_offset": next_run_offset,
     }
-
-
-
