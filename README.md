@@ -271,10 +271,10 @@ flowchart LR
     subgraph ClientApp["Client Application (e.g. Order Service)"]
         U[User / API] --> Svc[OrderService / CheckoutService]
         Svc -->|BEGIN TRANSACTION| DB[(PostgreSQL)]
-        DB <-->|Domain tables<br/>e.g. orders, payments| BizTables
+        DB <-->|Domain tables| BizTables
         DB <-->|Outbox table| OutboxTable[Outbox]
-        Svc -->|INSERT business data + INSERT outbox<br/>in one transaction| BizTables
-        Svc -->|INSERT event into outbox<br/>in same transaction| OutboxTable
+        Svc -->|INSERT business data + INSERT outbox in one transaction| BizTables
+        Svc -->|INSERT event into outbox in same transaction| OutboxTable
         Svc -->|COMMIT| DB
     end
 
@@ -289,8 +289,8 @@ flowchart LR
         end
     end
 
-    H --> Ext1[External System A<br/>(e.g. invoicing)]
-    H --> Ext2[External System B<br/>(e.g. notifications)]
+    H --> Ext1[External System A]
+    H --> Ext2[External System B]
 
     style OutboxTable fill:#ffe0b2,stroke:#cc7a00,stroke-width:2px
     style BizTables fill:#e0f7fa,stroke:#00796b,stroke-width:1px
@@ -318,12 +318,12 @@ calling an external system.
 ```mermaid
 sequenceDiagram
     participant User as User / API Client
-    participant App as Client App<br/>(OrderService)
+    participant App as Client App (OrderService)
     participant DB as PostgreSQL
     participant Outbox as Outbox table
     participant DBox as Dispatchbox Worker
     participant H as Event Handler
-    participant Ext as External System<br/>(e.g. Billing / Notifications)
+    participant Ext as External System (e.g. Billing / Notifications)
 
     User->>App: POST /checkout (order data)
     activate App
@@ -331,30 +331,30 @@ sequenceDiagram
     App->>DB: BEGIN TRANSACTION
     App->>DB: INSERT INTO orders (...)
     App->>DB: INSERT INTO payments (...)
-    App->>Outbox: INSERT INTO outbox<br/>(aggregate_type, event_type, payload, ...)
+    App->>Outbox: INSERT INTO outbox (aggregate_type, event_type, payload, ...)
     App->>DB: COMMIT
     deactivate App
 
-    Note over DB,Outbox: Domain data + outbox event<br/>committed atomically
+    Note over DB,Outbox: Domain data and outbox event committed atomically
 
     loop Every poll_interval seconds
-        DBox->>Outbox: SELECT ... FOR UPDATE SKIP LOCKED<br/>WHERE status IN (pending, retry)
+        DBox->>Outbox: SELECT ... FOR UPDATE SKIP LOCKED WHERE status IN (pending, retry)
         Note right of DBox: Fetch batch of events
     end
 
     DBox->>DBox: Deserialize event into model
-    DBox->>H: Call handler<br/>e.g. handle_order_placed(payload)
+    DBox->>H: Call handler, e.g. handle_order_placed(payload)
     activate H
 
     H->>Ext: HTTP call / publish to queue
     Ext-->>H: Response / acknowledgement
     deactivate H
 
-    DBox->>Outbox: UPDATE outbox SET status='done', ...<br/>WHERE id = event_id
+    DBox->>Outbox: UPDATE outbox SET status='done', ... WHERE id = event_id
 
     alt Handler or integration error
-        DBox->>Outbox: UPDATE outbox SET status='retry',<br/>attempts=attempts+1,<br/>next_run_at = now() + backoff
-        Note right of DBox: After max_attempts<br/>status='dead' (DLQ)
+        DBox->>Outbox: UPDATE outbox SET status='retry', attempts=attempts+1, next_run_at = now() + backoff
+        Note right of DBox: After max_attempts status='dead' (DLQ)
     end
 ```
 
