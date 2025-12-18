@@ -1,46 +1,26 @@
-from faker import Faker
 import json
-import random
-
-fake = Faker()
+from outbox_generator import STATUSES, generate_event
 
 num_records = 100
-statuses = ['pending', 'retry', 'done', 'dead']
 
 values = []
 
 for i in range(1, num_records + 1):
-    aggregate_type = random.choice(['order', 'invoice', 'user'])
-
-    if aggregate_type == 'order':
-        aggregate_id = str(1000 + i)
-        event_type = 'order.created'
-        payload = {
-            'orderId': aggregate_id,
-            'customerId': 'C' + str(i).zfill(3),
-            'totalCents': random.randint(1000, 20000)
-        }
-    elif aggregate_type == 'invoice':
-        aggregate_id = str(2000 + i)
-        event_type = 'invoice.generated'
-        payload = {
-            'invoiceId': aggregate_id,
-            'orderId': str(1000 + i),
-            'amountCents': random.randint(1000, 20000)
-        }
-    else:  # user
-        aggregate_id = f'U{i:04d}'
-        event_type = 'user.registered'
-        payload = {
-            'userId': aggregate_id,
-            'email': fake.email()
-        }
-
-    status = random.choice(statuses)
-    attempts = random.randint(0, 5)
-    # losowy next_run_at w przeszłości 0-10 minut
-    next_run_offset = random.randint(0, 600)
-    values.append(f"('{aggregate_type}', '{aggregate_id}', '{event_type}', '{json.dumps(payload)}'::jsonb, '{status}', {attempts}, now() - interval '{next_run_offset} seconds')")
+    event = generate_event(i, STATUSES)
+    payload_json = json.dumps(event["payload"]).replace("'", "''")
+    values.append(
+        "('{aggregate_type}', '{aggregate_id}', '{event_type}', "
+        "'{payload}'::jsonb, '{status}', {attempts}, "
+        "now() - interval '{offset} seconds')".format(
+            aggregate_type=event["aggregate_type"],
+            aggregate_id=event["aggregate_id"],
+            event_type=event["event_type"],
+            payload=payload_json,
+            status=event["status"],
+            attempts=event["attempts"],
+            offset=event["next_run_offset"],
+        )
+    )
 
 # dzielimy na paczki po 100 rekordów, żeby nie generować 1000 w jednym INSERT (bezpieczniejsze)
 batch_size = 100
