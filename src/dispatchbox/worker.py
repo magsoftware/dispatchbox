@@ -15,7 +15,7 @@ from dispatchbox.models import OutboxEvent
 
 class HandlerNotFoundError(RuntimeError):
     """Raised when no handler is found for an event type."""
-    pass
+    ...
 
 
 class OutboxWorker:

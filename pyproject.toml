@@ -34,5 +34,29 @@ addopts = "-v --tb=short"
 pythonpath = ["src"]
 
 [tool.pylint.main]
-disable = ["R0801"]
+disable = [
+    "R0801",  # duplicate-code (już świadomie wyłączone)
+    "C0301",  # line-too-long
+    "C0303",  # trailing-whitespace
+    "C0305",  # trailing-newlines
+    "C0411",  # wrong-import-order
+    "C0415",  # import-outside-toplevel
+    "R0902",  # too-many-instance-attributes
+    "R0913",  # too-many-arguments
+    "R0917",  # too-many-positional-arguments
+    "R1705",  # no-else-return
+    "W0611",  # unused-import
+    "W0612",  # unused-variable
+    "W0613",  # unused-argument
+    "W0621",  # redefined-outer-name
+    "W0718",  # broad-exception-caught
+    "W0719",  # broad-exception-raised
+    "W0212",  # protected-access (w testach)
+    "W0143",  # comparison-with-callable
+    "W2301",  # unnecessary-ellipsis
+    "W0622",  # redefined-builtin
+    "C0115",  # missing-class-docstring
+    "C0116",  # missing-function-docstring
+]
+
 

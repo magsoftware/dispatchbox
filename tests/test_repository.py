@@ -31,24 +31,33 @@ def test_fetch_pending_returns_events(mock_db_connection, mock_cursor, sample_ev
     """Test fetch_pending returns list of OutboxEvent instances."""
     # Setup mock cursor to return sample data
     # RealDictCursor returns dict-like objects
-    class MockRow:
-        def __init__(self, data):
-            self._data = data
-        def __getitem__(self, key):
-            return self._data[key]
-        def keys(self):
-            return self._data.keys()
-        def __iter__(self):
-            return iter(self._data)
-        def __contains__(self, key):
-            return key in self._data
-    
+class MockRow:
+    """Lightweight mapping used to emulate database rows."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def keys(self):
+        return self._data.keys()
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __contains__(self, key):
+        return key in self._data
+
+
+def test_fetch_pending_with_results(mock_db_connection, mock_cursor, sample_event_dict):
+    """Test fetch_pending returns OutboxEvent list when rows are present."""
     mock_row = MockRow(sample_event_dict)
     mock_cursor.fetchall.return_value = [mock_row]
-    
+
     repo = OutboxRepository("host=localhost dbname=test")
     events = repo.fetch_pending(10)
-    
+
     assert len(events) == 1
     assert isinstance(events[0], OutboxEvent)
     assert events[0].id == 1
