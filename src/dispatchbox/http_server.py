@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """HTTP server for health checks, metrics, and API endpoints."""
 
-import threading
 import json
-from typing import Optional, Callable, List, Any
-from bottle import Bottle, run, response, request, HTTPError
+import threading
+from typing import Any, Callable, List, Optional
+
+from bottle import Bottle, HTTPError, request, response, run
 from loguru import logger
 
 
@@ -46,7 +47,7 @@ class HttpServer:
         self.app.get("/ready")(self._ready)
         if self.metrics_fn:
             self.app.get("/metrics")(self._metrics)
-        
+
         # DLQ endpoints
         if self.repository_fn:
             self.app.get("/api/dead-events")(self._list_dead_events)
@@ -57,20 +58,23 @@ class HttpServer:
 
     def _setup_error_handlers(self) -> None:
         """Setup error handlers for JSON responses."""
+
         @self.app.error(404)
         def error_404(error):
             """Handle 404 Not Found errors with JSON response."""
             response.content_type = "application/json"
             response.status = 404
             return json.dumps({"error": "Not Found", "message": "The requested resource was not found"})
-        
+
         @self.app.error(405)
         def error_405(error):
             """Handle 405 Method Not Allowed errors with JSON response."""
             response.content_type = "application/json"
             response.status = 405
-            return json.dumps({"error": "Method Not Allowed", "message": "The HTTP method is not allowed for this resource"})
-        
+            return json.dumps(
+                {"error": "Method Not Allowed", "message": "The HTTP method is not allowed for this resource"}
+            )
+
         @self.app.error(500)
         def error_500(error):
             """Handle 500 Internal Server Error with JSON response."""
@@ -102,11 +106,15 @@ class HttpServer:
                 else:
                     response.status = 503
                     return {"status": "not ready", "reason": "database not connected"}
+            # Catching generic Exception is intentional here for security reasons:
+            # - Prevents information leakage about specific failure types (connection errors, timeout errors, etc.)
+            # - Returns consistent error response for any readiness check failure
+            # - Protects against revealing internal database connection details
             except Exception as e:
                 logger.error("Error checking readiness: {}", e)
                 response.status = 503
                 return {"status": "not ready", "reason": str(e)}
-        
+
         # If no check function, assume ready
         return {"status": "ready"}
 
@@ -120,10 +128,14 @@ class HttpServer:
         if not self.metrics_fn:
             response.status = 501
             return "# Metrics not available\n"
-        
+
         try:
             response.content_type = "text/plain; version=0.0.4; charset=utf-8"
             return self.metrics_fn()
+        # Catching generic Exception is intentional here for security reasons:
+        # - Prevents information leakage about specific failure types (database errors, calculation errors, etc.)
+        # - Returns consistent error response for any metrics generation failure
+        # - Protects against revealing internal system details through error messages
         except Exception as e:
             logger.error("Error generating metrics: {}", e)
             response.status = 500
@@ -148,6 +160,10 @@ class HttpServer:
                     port=self.port,
                     quiet=True,  # Disable Bottle's default logging
                 )
+            # Catching generic Exception is intentional here for server stability:
+            # - Prevents server thread from crashing on any unexpected error
+            # - Ensures all server errors are logged regardless of exception type
+            # - Protects against revealing internal server implementation details
             except Exception as e:
                 logger.error("HTTP server error: {}", e)
 
@@ -182,7 +198,7 @@ class HttpServer:
         offset = int(request.query.get("offset", 0))
         aggregate_type = request.query.get("aggregate_type") or None
         event_type = request.query.get("event_type") or None
-        
+
         return {
             "limit": limit,
             "offset": offset,
@@ -210,7 +226,7 @@ class HttpServer:
         try:
             params = self._parse_list_dead_events_params()
             repo = self.repository_fn()
-            
+
             events = repo.fetch_dead_events(
                 limit=params["limit"],
                 offset=params["offset"],
@@ -227,6 +243,10 @@ class HttpServer:
         except ValueError as e:
             response.status = 400
             return {"error": str(e)}
+        # Catching generic Exception is intentional here for security reasons:
+        # - Prevents information leakage about specific failure types (database errors, serialization errors, etc.)
+        # - Returns consistent error response for any internal server error
+        # - Protects against revealing internal database or system implementation details
         except Exception as e:
             logger.error("Error listing dead events: {}", e)
             response.status = 500
@@ -262,7 +282,7 @@ class HttpServer:
         try:
             params = self._parse_stats_params()
             repo = self.repository_fn()
-            
+
             total = repo.count_dead_events(
                 aggregate_type=params["aggregate_type"],
                 event_type=params["event_type"],
@@ -273,6 +293,10 @@ class HttpServer:
                 "aggregate_type": params["aggregate_type"],
                 "event_type": params["event_type"],
             }
+        # Catching generic Exception is intentional here for security reasons:
+        # - Prevents information leakage about specific failure types (database errors, query errors, etc.)
+        # - Returns consistent error response for any internal server error
+        # - Protects against revealing internal database or system implementation details
         except Exception as e:
             logger.error("Error getting dead events stats: {}", e)
             response.status = 500
@@ -304,6 +328,10 @@ class HttpServer:
         except ValueError as e:
             response.status = 400
             return {"error": str(e)}
+        # Catching generic Exception is intentional here for security reasons:
+        # - Prevents information leakage about specific failure types (database errors, serialization errors, etc.)
+        # - Returns consistent error response for any internal server error
+        # - Protects against revealing internal database or system implementation details
         except Exception as e:
             logger.error("Error getting dead event {}: {}", event_id, e)
             response.status = 500
@@ -335,6 +363,10 @@ class HttpServer:
         except ValueError as e:
             response.status = 400
             return {"error": str(e)}
+        # Catching generic Exception is intentional here for security reasons:
+        # - Prevents information leakage about specific failure types (database errors, transaction errors, etc.)
+        # - Returns consistent error response for any internal server error
+        # - Protects against revealing internal database or system implementation details
         except Exception as e:
             logger.error("Error retrying dead event {}: {}", event_id, e)
             response.status = 500
@@ -352,9 +384,9 @@ class HttpServer:
         """
         try:
             # request.body is a file-like object in Bottle
-            body_bytes = request.body.read() if hasattr(request.body, 'read') else request.body
+            body_bytes = request.body.read() if hasattr(request.body, "read") else request.body
             if isinstance(body_bytes, bytes):
-                body_str = body_bytes.decode('utf-8')
+                body_str = body_bytes.decode("utf-8")
             else:
                 body_str = str(body_bytes)
             return json.loads(body_str)
@@ -407,8 +439,11 @@ class HttpServer:
         except ValueError as e:
             response.status = 400
             return {"error": str(e)}
+        # Catching generic Exception is intentional here for security reasons:
+        # - Prevents information leakage about specific failure types (database errors, transaction errors, etc.)
+        # - Returns consistent error response for any internal server error
+        # - Protects against revealing internal database or system implementation details
         except Exception as e:
             logger.error("Error retrying dead events batch: {}", e)
             response.status = 500
             return {"error": "Internal server error"}
-

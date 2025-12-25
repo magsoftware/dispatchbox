@@ -1,0 +1,34 @@
+---
+description: Project directory structure and import conventions
+alwaysApply: true
+---
+
+# Project Structure
+
+> This document defines mandatory project conventions.
+> These rules apply to both human contributors and AI-generated code.
+
+## Always on
+
+These rules apply to all code organization and structure decisions.
+
+### Directory Layout
+
+- `src/dispatchbox/` - Source code
+  - `cli.py` - Command-line interface
+  - `config.py` - Configuration constants
+  - `handlers.py` - Event handlers
+  - `http_server.py` - HTTP server for health checks and API
+  - `models.py` - Data models (OutboxEvent)
+  - `repository.py` - Database repository
+  - `supervisor.py` - Process supervision
+  - `worker.py` - Worker implementation
+- `tests/` - Test files
+- `docs/` - Documentation
+- `scripts/` - Utility scripts
+- `sql/` - SQL scripts
+
+### Import Style
+
+- Use absolute imports from `dispatchbox`
+- Group imports: standard library, third-party, local

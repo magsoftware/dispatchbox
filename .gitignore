@@ -136,12 +136,19 @@ dmypy.json
 cython_debug/
 
 # IDEs
-.vscode/
 .idea/
 *.swp
 *.swo
 *~
 .DS_Store
+
+# Cursor IDE
+# .cursor/*
+# !.cursor/rules/**
+
+# VSCode IDE
+.vscode/*
+!.vscode/tasks.json
 
 # uv
 .uv/
@@ -149,4 +156,3 @@ cython_debug/
 # Local database files
 *.db
 *.sqlite
-

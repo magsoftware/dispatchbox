@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """OutboxWorker class for processing outbox events."""
 
-import time
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from multiprocessing import Event
-from typing import Dict, Callable, Any, List, Optional
+import time
+from typing import Any, Callable, Dict, List, Optional
 
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from loguru import logger
 
 from dispatchbox.handlers import HANDLERS
-from dispatchbox.repository import OutboxRepository
 from dispatchbox.models import OutboxEvent
+from dispatchbox.repository import OutboxRepository
 
 
 class HandlerNotFoundError(RuntimeError):
     """Raised when no handler is found for an event type."""
+
     ...
 
 
@@ -43,7 +44,7 @@ class OutboxWorker:
         """
         if repository is None:
             raise ValueError("repository is required")
-        
+
         self.batch_size: int = batch_size
         self.poll_interval: float = poll_interval
         self.stop_event: Optional[Event] = stop_event
@@ -51,7 +52,6 @@ class OutboxWorker:
         self.repository: OutboxRepository = repository
 
         self.executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=max_parallel)
-
 
     def process_event(self, event: OutboxEvent) -> None:
         """
@@ -72,7 +72,6 @@ class OutboxWorker:
 
         handler(payload)
 
-
     def run_loop(self) -> None:
         """Main processing loop that fetches and processes events."""
         logger.info("Worker started")
@@ -87,8 +86,7 @@ class OutboxWorker:
             logger.debug("Fetched {} events for processing", len(batch))
 
             futures: Dict[Future[None], OutboxEvent] = {
-                self.executor.submit(self.process_event, evt): evt
-                for evt in batch
+                self.executor.submit(self.process_event, evt): evt for evt in batch
             }
 
             for future in as_completed(futures):
@@ -103,7 +101,10 @@ class OutboxWorker:
                     future.result()
                     self.repository.mark_success(event_id)
                     logger.debug("Successfully processed event {}", event_id)
+                # Catching generic Exception is intentional here for security reasons:
+                # - Prevents information leakage about specific failure types (handler errors, validation failures, etc.)
+                # - Ensures all events are properly marked for retry regardless of exception type
+                # - Protects against revealing internal implementation details through error handling
                 except Exception as e:
                     logger.error("Error processing event {}: {}", event_id, e, exc_info=True)
                     self.repository.mark_retry(event_id)
-

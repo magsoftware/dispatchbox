@@ -1,0 +1,33 @@
+---
+description: Markdown formatting and style conventions
+globs: ["*.md", "*.mdc"]
+alwaysApply: true
+---
+
+# Markdown
+
+> This document defines mandatory project conventions.
+> These rules apply to both human contributors and AI-generated code.
+
+## Always on
+
+### Formatting Rules
+
+- Use proper heading hierarchy (H1 → H2 → H3)
+- Use code blocks with language tags for code examples
+- Use backticks for inline code and file names
+- Use lists for multiple items
+- Use tables for structured data
+- Keep line length reasonable (max 120 characters)
+
+### Code Blocks
+
+- Always specify language for code blocks
+- Use triple backticks with language identifier
+- Example: ` ```python ` for Python code
+
+### Links
+
+- Use descriptive link text
+- Prefer relative paths for internal links
+- Use absolute URLs for external links

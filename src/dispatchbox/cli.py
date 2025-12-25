@@ -3,79 +3,70 @@
 
 import argparse
 import sys
-from typing import Optional, Callable
+from typing import Callable, Optional
+
 from loguru import logger
 
-from dispatchbox.supervisor import start_processes
-from dispatchbox.http_server import HttpServer
-from dispatchbox.repository import OutboxRepository
 from dispatchbox.config import (
     DEFAULT_BATCH_SIZE,
-    DEFAULT_POLL_INTERVAL,
-    DEFAULT_NUM_PROCESSES,
-    DEFAULT_LOG_LEVEL,
     DEFAULT_HTTP_HOST,
     DEFAULT_HTTP_PORT,
+    DEFAULT_LOG_LEVEL,
+    DEFAULT_NUM_PROCESSES,
+    DEFAULT_POLL_INTERVAL,
 )
+from dispatchbox.http_server import HttpServer
+from dispatchbox.repository import OutboxRepository
+from dispatchbox.supervisor import start_processes
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
         description="Outbox worker (multi-process, SKIP LOCKED). "
-                    "Fetches pending/retry events from Postgres and processes them in parallel threads."
+        "Fetches pending/retry events from Postgres and processes them in parallel threads."
     )
     parser.add_argument(
         "--dsn",
         required=True,
         help="Postgres DSN (libpq style) or connection string, e.g. "
-             "'host=localhost port=5432 dbname=outbox user=postgres password=postgres'"
+        "'host=localhost port=5432 dbname=outbox user=postgres password=postgres'",
     )
     parser.add_argument(
         "--processes",
         type=int,
         default=DEFAULT_NUM_PROCESSES,
-        help=f"Number of worker processes to start (default: {DEFAULT_NUM_PROCESSES})"
+        help=f"Number of worker processes to start (default: {DEFAULT_NUM_PROCESSES})",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=DEFAULT_BATCH_SIZE,
-        help=f"How many events to fetch per DB round (default: {DEFAULT_BATCH_SIZE})"
+        help=f"How many events to fetch per DB round (default: {DEFAULT_BATCH_SIZE})",
     )
     parser.add_argument(
         "--poll-interval",
         type=float,
         default=DEFAULT_POLL_INTERVAL,
-        help=f"Seconds to sleep when no work (default: {DEFAULT_POLL_INTERVAL})"
+        help=f"Seconds to sleep when no work (default: {DEFAULT_POLL_INTERVAL})",
     )
     parser.add_argument(
         "--log-level",
         default=DEFAULT_LOG_LEVEL,
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        help=f"Logging level (default: {DEFAULT_LOG_LEVEL})"
+        help=f"Logging level (default: {DEFAULT_LOG_LEVEL})",
     )
+    parser.add_argument("--show-help", action="store_true", help="Display this help message and exit")
     parser.add_argument(
-        "--show-help",
-        action="store_true",
-        help="Display this help message and exit"
-    )
-    parser.add_argument(
-        "--http-host",
-        default=DEFAULT_HTTP_HOST,
-        help=f"HTTP server host (default: {DEFAULT_HTTP_HOST})"
+        "--http-host", default=DEFAULT_HTTP_HOST, help=f"HTTP server host (default: {DEFAULT_HTTP_HOST})"
     )
     parser.add_argument(
         "--http-port",
         type=int,
         default=DEFAULT_HTTP_PORT,
-        help=f"HTTP server port for health checks and metrics (default: {DEFAULT_HTTP_PORT})"
+        help=f"HTTP server port for health checks and metrics (default: {DEFAULT_HTTP_PORT})",
     )
-    parser.add_argument(
-        "--disable-http",
-        action="store_true",
-        help="Disable HTTP server for health checks and metrics"
-    )
+    parser.add_argument("--disable-http", action="store_true", help="Disable HTTP server for health checks and metrics")
     return parser.parse_args()
 
 
@@ -83,7 +74,7 @@ def help() -> None:
     """Display help message for the user."""
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
         description="Outbox worker (multi-process, SKIP LOCKED). "
-                    "Fetches pending/retry events from Postgres and processes them in parallel threads."
+        "Fetches pending/retry events from Postgres and processes them in parallel threads."
     )
     parser.print_help()
 
@@ -116,15 +107,20 @@ def create_db_check_function(dsn: str) -> Callable[[], bool]:
     Returns:
         Function that checks database connectivity
     """
+
     def check_db() -> bool:
         try:
             repo = OutboxRepository(dsn, connect_timeout=2, query_timeout=2)
             is_connected = repo.is_connected()
             repo.close()
             return is_connected
+        # Catching generic Exception is intentional here for security reasons:
+        # - Prevents information leakage about specific failure types (connection errors, timeout errors, etc.)
+        # - Returns False for any connection failure, maintaining consistent security posture
+        # - Protects against revealing internal database connection details
         except Exception:
             return False
-    
+
     return check_db
 
 
@@ -138,6 +134,7 @@ def create_repository_factory(dsn: str) -> Callable[[], OutboxRepository]:
     Returns:
         Factory function that returns a new repository instance
     """
+
     def get_repository() -> OutboxRepository:
         """Factory function that returns a new repository instance for each request."""
         return OutboxRepository(
@@ -145,7 +142,7 @@ def create_repository_factory(dsn: str) -> Callable[[], OutboxRepository]:
             connect_timeout=2,
             query_timeout=5,
         )
-    
+
     return get_repository
 
 
@@ -173,7 +170,7 @@ def setup_http_server(args: argparse.Namespace) -> Optional[HttpServer]:
     )
     http_server.start()
     logger.info("HTTP server enabled on {}:{}", args.http_host, args.http_port)
-    
+
     return http_server
 
 
@@ -186,12 +183,12 @@ def main() -> None:
         return
 
     setup_logging(args.log_level)
-    
+
     logger.info(
         "Starting dispatchbox supervisor: processes={} batch_size={} poll_interval={}",
         args.processes,
         args.batch_size,
-        args.poll_interval
+        args.poll_interval,
     )
 
     http_server = setup_http_server(args)
@@ -206,4 +203,3 @@ def main() -> None:
     finally:
         if http_server:
             http_server.stop()
-

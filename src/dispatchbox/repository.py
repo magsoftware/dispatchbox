@@ -2,14 +2,14 @@
 """Repository for outbox events database operations."""
 
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Any
+from typing import Any, List, Optional
 
+from loguru import logger
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from loguru import logger
 
-from dispatchbox.models import OutboxEvent
 from dispatchbox.config import DEFAULT_MAX_ATTEMPTS
+from dispatchbox.models import OutboxEvent
 
 
 class OutboxRepository:
@@ -17,7 +17,7 @@ class OutboxRepository:
 
     # SQL queries as class constants
     FETCH_PENDING_SQL = """
-        SELECT id, aggregate_type, aggregate_id, event_type, payload, 
+        SELECT id, aggregate_type, aggregate_id, event_type, payload,
                status, attempts, next_run_at, created_at
         FROM outbox_event
         WHERE status IN ('pending','retry')
@@ -36,7 +36,7 @@ class OutboxRepository:
 
     MARK_RETRY_SQL = """
         UPDATE outbox_event
-        SET status = CASE 
+        SET status = CASE
             WHEN attempts + 1 >= %s THEN 'dead'
             ELSE 'retry'
         END,
@@ -55,7 +55,7 @@ class OutboxRepository:
     SET_TIMEOUT_SQL = "SET statement_timeout = %s;"
 
     FETCH_DEAD_EVENTS_BASE_SQL = """
-        SELECT id, aggregate_type, aggregate_id, event_type, payload, 
+        SELECT id, aggregate_type, aggregate_id, event_type, payload,
                status, attempts, next_run_at, created_at
         FROM outbox_event
         WHERE status = 'dead'
@@ -70,7 +70,7 @@ class OutboxRepository:
     """
 
     FETCH_DEAD_EVENT_BY_ID_SQL = """
-        SELECT id, aggregate_type, aggregate_id, event_type, payload, 
+        SELECT id, aggregate_type, aggregate_id, event_type, payload,
                status, attempts, next_run_at, created_at
         FROM outbox_event
         WHERE id = %s AND status = 'dead';
@@ -195,12 +195,12 @@ class OutboxRepository:
         """
         self._validate_dsn(dsn)
         self._validate_parameters(retry_backoff_seconds, connect_timeout, query_timeout, max_attempts)
-        
+
         self.dsn: str = dsn.strip()
         self.retry_backoff: int = retry_backoff_seconds
         self.query_timeout: int = query_timeout
         self.max_attempts: int = max_attempts
-        
+
         dsn_with_timeout = self._add_connect_timeout_to_dsn(self.dsn, connect_timeout)
         self.conn: Any = self._establish_connection(dsn_with_timeout)
 
@@ -238,9 +238,13 @@ class OutboxRepository:
         logger.warning("Database connection lost, attempting to reconnect...")
         try:
             self.conn.close()
+        # Catching generic Exception is intentional here for cleanup safety:
+        # - Connection may already be closed or in an invalid state
+        # - Prevents cleanup failures from blocking reconnection attempts
+        # - Ensures reconnection proceeds regardless of close() outcome
         except Exception:
             pass
-        
+
         try:
             # Reconnect with same timeout settings (default 10s for reconnect)
             dsn_with_timeout = self._add_connect_timeout_to_dsn(self.dsn, 10)
@@ -276,7 +280,7 @@ class OutboxRepository:
         """
         if batch_size < 1:
             raise ValueError("batch_size must be at least 1")
-        
+
         self._check_connection()
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             self._set_query_timeout(cur)
@@ -297,7 +301,7 @@ class OutboxRepository:
         """
         if event_id is None or event_id < 1:
             raise ValueError("event_id must be a positive integer")
-        
+
         self._check_connection()
         with self.conn.cursor() as cur:
             self._set_query_timeout(cur)
@@ -323,7 +327,7 @@ class OutboxRepository:
         """
         cur.execute(self.CHECK_STATUS_SQL, (event_id,))
         result = cur.fetchone()
-        if result and result[0] == 'dead':
+        if result and result[0] == "dead":
             logger.warning(
                 "Event {} exceeded max_attempts ({}), marked as dead",
                 event_id,
@@ -343,10 +347,10 @@ class OutboxRepository:
         """
         if event_id is None or event_id < 1:
             raise ValueError("event_id must be a positive integer")
-        
+
         self._check_connection()
         next_run_at = self._calculate_next_run_at()
-        
+
         with self.conn.cursor() as cur:
             self._set_query_timeout(cur)
             cur.execute(
@@ -387,17 +391,17 @@ class OutboxRepository:
         """
         sql = self.FETCH_DEAD_EVENTS_BASE_SQL
         params: List[Any] = []
-        
+
         if aggregate_type:
             sql += " AND aggregate_type = %s"
             params.append(aggregate_type)
-        
+
         if event_type:
             sql += " AND event_type = %s"
             params.append(event_type)
-        
+
         sql += self.FETCH_DEAD_EVENTS_ORDER_LIMIT_SQL
-        
+
         return sql, params
 
     def fetch_dead_events(
@@ -425,10 +429,10 @@ class OutboxRepository:
             raise ValueError("offset must be non-negative")
 
         self._check_connection()
-        
+
         sql, params = self._build_dead_events_sql(aggregate_type, event_type)
         params.extend([limit, offset])
-        
+
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             self._set_query_timeout(cur)
             cur.execute(sql, tuple(params))
@@ -453,15 +457,15 @@ class OutboxRepository:
         """
         sql = self.COUNT_DEAD_EVENTS_BASE_SQL
         params: List[Any] = []
-        
+
         if aggregate_type:
             sql += " AND aggregate_type = %s"
             params.append(aggregate_type)
-        
+
         if event_type:
             sql += " AND event_type = %s"
             params.append(event_type)
-        
+
         return sql, params
 
     def count_dead_events(
@@ -480,15 +484,15 @@ class OutboxRepository:
             Number of dead events
         """
         self._check_connection()
-        
+
         sql, params = self._build_count_dead_events_sql(aggregate_type, event_type)
-        
+
         with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
             self._set_query_timeout(cur)
             cur.execute(sql, tuple(params) if params else None)
             result = cur.fetchone()
             self.conn.commit()
-            return result['count'] if result else 0
+            return result["count"] if result else 0
 
     def get_dead_event(self, event_id: int) -> Optional[OutboxEvent]:
         """
@@ -551,16 +555,15 @@ class OutboxRepository:
         """
         if not event_ids:
             raise ValueError("event_ids cannot be empty")
-        
+
         if any(eid is None or eid < 1 for eid in event_ids):
             raise ValueError("All event_ids must be positive integers")
 
         self._check_connection()
-        
+
         with self.conn.cursor() as cur:
             self._set_query_timeout(cur)
             # Use ANY(%s) with array parameter for better performance
             cur.execute(self.RETRY_DEAD_EVENTS_BATCH_SQL, (event_ids,))
             self.conn.commit()
             return cur.rowcount
-

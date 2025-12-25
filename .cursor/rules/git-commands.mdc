@@ -1,0 +1,54 @@
+---
+description: Git command conventions and conventional commits
+alwaysApply: true
+---
+
+# Git Commands
+
+> This document defines mandatory project conventions.
+> These rules apply to both human contributors and AI-generated code.
+
+## Always on
+
+### Commit Message Format
+
+Use [Conventional Commits](https://www.conventionalcommits.org/) format:
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types
+
+- `feat`: New feature
+- `fix`: Bug fix
+- `docs`: Documentation changes
+- `style`: Code style changes (formatting, missing semicolons, etc.)
+- `refactor`: Code refactoring
+- `perf`: Performance improvements
+- `test`: Adding or updating tests
+- `chore`: Maintenance tasks (dependencies, build, etc.)
+- `build`: Build system changes
+- `ci`: CI/CD changes
+
+### Examples
+
+```
+feat: add dead letter queue API endpoints
+
+fix: handle database reconnection errors
+
+docs: update README with installation instructions
+
+test: add unit tests for OutboxRepository
+```
+
+### Git Commands
+
+- Use `git add .` to stage all changes
+- Use `git commit -m "type: description"` for commits
+- Use `git log --oneline` to view commit history
