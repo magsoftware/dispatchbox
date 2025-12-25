@@ -34,7 +34,7 @@ class OutboxEvent:
         next_run_at = data.get("next_run_at")
         if next_run_at is None:
             raise ValueError("next_run_at is required")
-        
+
         return cls(
             id=data.get("id"),
             aggregate_type=data.get("aggregate_type", ""),
@@ -62,11 +62,14 @@ class OutboxEvent:
             "payload": self.payload,
             "status": self.status,
             "attempts": self.attempts,
-            "next_run_at": self.next_run_at.isoformat() if isinstance(self.next_run_at, datetime) else self.next_run_at,
+            "next_run_at": (
+                self.next_run_at.isoformat() if isinstance(self.next_run_at, datetime) else self.next_run_at
+            ),
         }
         if self.id is not None:
             result["id"] = self.id
         if self.created_at is not None:
-            result["created_at"] = self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at
+            result["created_at"] = (
+                self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at
+            )
         return result
-

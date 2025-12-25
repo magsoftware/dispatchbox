@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Process supervision for outbox workers."""
 
+from multiprocessing import Event, Process
+import os
 import signal
 import sys
 import time
-from multiprocessing import Process, Event
-from typing import List, Any
+from typing import Any, List
 
 from loguru import logger
 
-from dispatchbox.worker import OutboxWorker
-from dispatchbox.repository import OutboxRepository
 from dispatchbox.config import DEFAULT_MAX_PARALLEL, DEFAULT_RETRY_BACKOFF_SECONDS
+from dispatchbox.repository import OutboxRepository
+from dispatchbox.worker import OutboxWorker
 
 
 def _setup_worker_logging(worker_name: str) -> str:
@@ -24,12 +25,10 @@ def _setup_worker_logging(worker_name: str) -> str:
     Returns:
         Full worker name with PID (e.g., "worker-00-pid12345")
     """
-    import os
-    
     pid = os.getpid()
     full_worker_name = f"{worker_name}-pid{pid}"
     logger.configure(extra={"worker": full_worker_name})
-    
+
     return full_worker_name
 
 
@@ -41,10 +40,11 @@ def _setup_worker_signal_handlers(stop_event: Event, worker_name: str) -> None:
         stop_event: Event to signal worker to stop
         worker_name: Full worker name for logging
     """
+
     def _signal_handler(sig: int, frame: Any) -> None:
         logger.info("Worker {} received signal {}, initiating shutdown...", worker_name, sig)
         stop_event.set()
-    
+
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
@@ -72,12 +72,9 @@ def worker_loop(
     """
     full_worker_name = _setup_worker_logging(worker_name)
     _setup_worker_signal_handlers(stop_event, full_worker_name)
-    
-    repository = OutboxRepository(
-        dsn=dsn,
-        retry_backoff_seconds=retry_backoff_seconds
-    )
-    
+
+    repository = OutboxRepository(dsn=dsn, retry_backoff_seconds=retry_backoff_seconds)
+
     worker = OutboxWorker(
         batch_size=batch_size,
         poll_interval=poll_interval,
@@ -85,7 +82,7 @@ def worker_loop(
         stop_event=stop_event,
         repository=repository,
     )
-    
+
     with repository:
         worker.run_loop()
 
@@ -98,6 +95,7 @@ def _setup_signal_handlers(stop_event: Event, children: List[Process]) -> None:
         stop_event: Event to signal workers to stop
         children: List of child processes
     """
+
     def _signal_handler(sig: int, frame: Any) -> None:
         logger.info("Parent received signal {}, stopping children...", sig)
         stop_event.set()
@@ -192,10 +190,14 @@ def start_processes(
     """
     stop_event: Event = Event()
     children = _start_worker_processes(
-        dsn, num_processes, stop_event, batch_size, poll_interval,
-        max_parallel, retry_backoff_seconds
+        dsn,
+        num_processes,
+        stop_event,
+        batch_size,
+        poll_interval,
+        max_parallel,
+        retry_backoff_seconds,
     )
-    
+
     _setup_signal_handlers(stop_event, children)
     _wait_for_processes(children, stop_event)
-

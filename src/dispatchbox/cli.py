@@ -57,9 +57,15 @@ def parse_args() -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help=f"Logging level (default: {DEFAULT_LOG_LEVEL})",
     )
-    parser.add_argument("--show-help", action="store_true", help="Display this help message and exit")
     parser.add_argument(
-        "--http-host", default=DEFAULT_HTTP_HOST, help=f"HTTP server host (default: {DEFAULT_HTTP_HOST})"
+        "--show-help",
+        action="store_true",
+        help="Display this help message and exit",
+    )
+    parser.add_argument(
+        "--http-host",
+        default=DEFAULT_HTTP_HOST,
+        help=f"HTTP server host (default: {DEFAULT_HTTP_HOST})",
     )
     parser.add_argument(
         "--http-port",
@@ -67,7 +73,11 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_HTTP_PORT,
         help=f"HTTP server port for health checks and metrics (default: {DEFAULT_HTTP_PORT})",
     )
-    parser.add_argument("--disable-http", action="store_true", help="Disable HTTP server for health checks and metrics")
+    parser.add_argument(
+        "--disable-http",
+        action="store_true",
+        help="Disable HTTP server for health checks and metrics",
+    )
     return parser.parse_args()
 
 
@@ -90,7 +100,13 @@ def setup_logging(log_level: str) -> None:
     logger.remove()  # Remove default handler
     logger.add(
         sys.stderr,
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <yellow>{extra[worker]}</yellow> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        format=(
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+            "<level>{level: <8}</level> | "
+            "<yellow>{extra[worker]}</yellow> | "
+            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+            "<level>{message}</level>"
+        ),
         level=log_level.upper(),
         colorize=True,
     )

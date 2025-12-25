@@ -101,10 +101,10 @@ class OutboxWorker:
                     future.result()
                     self.repository.mark_success(event_id)
                     logger.debug("Successfully processed event {}", event_id)
-                # Catching generic Exception is intentional here for security reasons:
-                # - Prevents information leakage about specific failure types (handler errors, validation failures, etc.)
-                # - Ensures all events are properly marked for retry regardless of exception type
-                # - Protects against revealing internal implementation details through error handling
+                # Catching generic Exception is intentional for security:
+                # - Prevents information leakage about specific failure types
+                # - Ensures all events are properly marked for retry
+                # - Protects against revealing internal implementation details
                 except Exception as e:
                     logger.error("Error processing event {}: {}", event_id, e, exc_info=True)
                     self.repository.mark_retry(event_id)

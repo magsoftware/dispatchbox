@@ -1,9 +1,10 @@
 """Shared fixtures for tests."""
 
-import pytest
 from datetime import datetime, timezone
-from typing import Dict, Any
-from unittest.mock import Mock, MagicMock
+from typing import Any, Dict
+from unittest.mock import MagicMock, Mock
+
+import pytest
 
 from dispatchbox.models import OutboxEvent
 
@@ -81,7 +82,7 @@ def mock_cursor(mock_db_connection):
 def mock_repository(mocker):
     """Mock OutboxRepository."""
     from dispatchbox.repository import OutboxRepository
-    
+
     mock_repo = mocker.Mock(spec=OutboxRepository)
     mock_repo.fetch_pending.return_value = []
     mock_repo.mark_success = mocker.Mock()
@@ -92,4 +93,3 @@ def mock_repository(mocker):
     mock_repo.dsn = "host=localhost dbname=test"
     mock_repo.retry_backoff = 30
     return mock_repo
-

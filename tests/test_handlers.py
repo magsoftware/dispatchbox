@@ -1,8 +1,10 @@
 """Tests for event handlers."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from dispatchbox.handlers import send_email, push_to_crm, record_analytics, HANDLERS
+
+from dispatchbox.handlers import HANDLERS, push_to_crm, record_analytics, send_email
 
 
 def test_send_email(sample_payload):
@@ -83,4 +85,3 @@ def test_handlers_call_with_payload(sample_payload):
         HANDLERS["order.created"](sample_payload)
         HANDLERS["order.created.analytics"](sample_payload)
         HANDLERS["order.created.crm"](sample_payload)
-

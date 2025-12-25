@@ -61,14 +61,14 @@ class HttpServer:
         """Setup error handlers for JSON responses."""
 
         @self.app.error(404)
-        def error_404(error):
+        def error_404(error: HTTPError) -> str:
             """Handle 404 Not Found errors with JSON response."""
             response.content_type = "application/json"
             response.status = 404
             return json.dumps({"error": "Not Found", "message": "The requested resource was not found"})
 
         @self.app.error(405)
-        def error_405(error):
+        def error_405(error: HTTPError) -> str:
             """Handle 405 Method Not Allowed errors with JSON response."""
             response.content_type = "application/json"
             response.status = 405
@@ -77,7 +77,7 @@ class HttpServer:
             )
 
         @self.app.error(500)
-        def error_500(error):
+        def error_500(error: HTTPError) -> str:
             """Handle 500 Internal Server Error with JSON response."""
             response.content_type = "application/json"
             response.status = 500
