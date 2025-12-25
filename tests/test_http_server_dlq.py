@@ -6,8 +6,8 @@ import io
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 from bottle import response as bottle_response
+import pytest
 
 from dispatchbox.http_server import HttpServer
 from dispatchbox.models import OutboxEvent
@@ -42,6 +42,7 @@ def sample_dead_event():
 @pytest.fixture
 def http_server_with_repo(mock_repository):
     """HttpServer with repository function."""
+
     def get_repo():
         return mock_repository
 
@@ -166,6 +167,26 @@ def test_dead_events_stats(http_server_with_repo):
         )
 
 
+def test_dead_events_stats_no_repository():
+    """Test GET /api/dead-events/stats returns 501 if no repository."""
+    server = HttpServer(host="127.0.0.1", port=8080)
+
+    result = server._dead_events_stats()
+    assert "error" in result
+    assert "Repository not available" in result["error"]
+    assert "501" in str(bottle_response.status)
+
+
+def test_dead_events_stats_no_repository():
+    """Test GET /api/dead-events/stats returns 501 if no repository."""
+    server = HttpServer(host="127.0.0.1", port=8080)
+
+    result = server._dead_events_stats()
+    assert "error" in result
+    assert "Repository not available" in result["error"]
+    assert "501" in str(bottle_response.status)
+
+
 def test_dead_events_stats_with_filters(http_server_with_repo):
     """Test GET /api/dead-events/stats with filters."""
     server, mock_repo = http_server_with_repo
@@ -205,6 +226,16 @@ def test_get_dead_event_not_found(http_server_with_repo):
     assert "404" in str(bottle_response.status)
 
 
+def test_get_dead_event_no_repository():
+    """Test GET /api/dead-events/:id returns 501 if no repository."""
+    server = HttpServer(host="127.0.0.1", port=8080)
+
+    result = server._get_dead_event(1)
+    assert "error" in result
+    assert "Repository not available" in result["error"]
+    assert "501" in str(bottle_response.status)
+
+
 def test_get_dead_event_invalid_id(http_server_with_repo):
     """Test GET /api/dead-events/:id with invalid ID."""
     server, mock_repo = http_server_with_repo
@@ -239,6 +270,16 @@ def test_retry_dead_event_not_found(http_server_with_repo):
     assert "error" in result
     assert "not found" in result["error"].lower()
     assert "404" in str(bottle_response.status)
+
+
+def test_retry_dead_event_no_repository():
+    """Test POST /api/dead-events/:id/retry returns 501 if no repository."""
+    server = HttpServer(host="127.0.0.1", port=8080)
+
+    result = server._retry_dead_event(1)
+    assert "error" in result
+    assert "Repository not available" in result["error"]
+    assert "501" in str(bottle_response.status)
 
 
 def test_retry_dead_event_invalid_id(http_server_with_repo):
@@ -306,3 +347,103 @@ def test_retry_dead_events_batch_no_repository():
         assert "error" in result
         assert "Repository not available" in result["error"]
         assert "501" in str(bottle_response.status)
+
+
+def test_retry_dead_events_batch_success_returns_count(http_server_with_repo):
+    """Test POST /api/dead-events/retry-batch returns correct count."""
+    server, mock_repo = http_server_with_repo
+    mock_repo.retry_dead_events_batch.return_value = 2
+
+    with patch("dispatchbox.http_server.request") as mock_request:
+        mock_request.body = io.BytesIO(json.dumps({"event_ids": [1, 2, 3]}).encode())
+        result = server._retry_dead_events_batch()
+
+        assert result["status"] == "success"
+        assert result["processed"] == 2
+        assert result["requested"] == 3
+
+
+def test_retry_dead_events_batch_handles_psycopg2_error(http_server_with_repo):
+    """Test POST /api/dead-events/retry-batch handles psycopg2.Error."""
+    import psycopg2
+
+    server, mock_repo = http_server_with_repo
+    mock_repo.retry_dead_events_batch.side_effect = psycopg2.OperationalError("Database error")
+
+    with patch("dispatchbox.http_server.request") as mock_request:
+        mock_request.body = io.BytesIO(json.dumps({"event_ids": [1, 2, 3]}).encode())
+        with patch("dispatchbox.http_server.logger") as mock_logger:
+            result = server._retry_dead_events_batch()
+
+            assert "error" in result
+            assert "Internal server error" in result["error"]
+            assert "500" in str(bottle_response.status)
+            mock_logger.error.assert_called_once()
+
+
+def test_list_dead_events_handles_psycopg2_error(http_server_with_repo):
+    """Test GET /api/dead-events handles psycopg2.Error."""
+    import psycopg2
+
+    server, mock_repo = http_server_with_repo
+    mock_repo.fetch_dead_events.side_effect = psycopg2.OperationalError("Database error")
+
+    with patch("dispatchbox.http_server.request") as mock_request:
+        mock_request.query.get.side_effect = lambda key, default=None: default
+        with patch("dispatchbox.http_server.logger") as mock_logger:
+            result = server._list_dead_events()
+
+            assert "error" in result
+            assert "Internal server error" in result["error"]
+            assert "500" in str(bottle_response.status)
+            mock_logger.error.assert_called_once()
+
+
+def test_dead_events_stats_handles_psycopg2_error(http_server_with_repo):
+    """Test GET /api/dead-events/stats handles psycopg2.Error."""
+    import psycopg2
+
+    server, mock_repo = http_server_with_repo
+    mock_repo.count_dead_events.side_effect = psycopg2.OperationalError("Database error")
+
+    with patch("dispatchbox.http_server.request") as mock_request:
+        mock_request.query.get.side_effect = lambda key, default=None: default
+        with patch("dispatchbox.http_server.logger") as mock_logger:
+            result = server._dead_events_stats()
+
+            assert "error" in result
+            assert "Internal server error" in result["error"]
+            assert "500" in str(bottle_response.status)
+            mock_logger.error.assert_called_once()
+
+
+def test_get_dead_event_handles_psycopg2_error(http_server_with_repo):
+    """Test GET /api/dead-events/:id handles psycopg2.Error."""
+    import psycopg2
+
+    server, mock_repo = http_server_with_repo
+    mock_repo.get_dead_event.side_effect = psycopg2.OperationalError("Database error")
+
+    with patch("dispatchbox.http_server.logger") as mock_logger:
+        result = server._get_dead_event(1)
+
+        assert "error" in result
+        assert "Internal server error" in result["error"]
+        assert "500" in str(bottle_response.status)
+        mock_logger.error.assert_called_once()
+
+
+def test_retry_dead_event_handles_psycopg2_error(http_server_with_repo):
+    """Test POST /api/dead-events/:id/retry handles psycopg2.Error."""
+    import psycopg2
+
+    server, mock_repo = http_server_with_repo
+    mock_repo.retry_dead_event.side_effect = psycopg2.OperationalError("Database error")
+
+    with patch("dispatchbox.http_server.logger") as mock_logger:
+        result = server._retry_dead_event(1)
+
+        assert "error" in result
+        assert "Internal server error" in result["error"]
+        assert "500" in str(bottle_response.status)
+        mock_logger.error.assert_called_once()
