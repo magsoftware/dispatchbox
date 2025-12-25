@@ -1,0 +1,17 @@
+[
+  {
+    "key": "cmd+shift+g",
+    "command": "workbench.action.tasks.runTask",
+    "args": "git: add and commit"
+  },
+  {
+    "key": "cmd+shift+c",
+    "command": "workbench.action.tasks.runTask",
+    "args": "git: add, commit with conventional commit"
+  },
+  {
+    "key": "cmd+shift+t",
+    "command": "workbench.action.tasks.runTask",
+    "args": "test: run all tests"
+  }
+]
