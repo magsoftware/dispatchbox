@@ -16,8 +16,6 @@ from dispatchbox.repository import OutboxRepository
 class HandlerNotFoundError(RuntimeError):
     """Raised when no handler is found for an event type."""
 
-    ...
-
 
 class OutboxWorker:
     """Worker for processing outbox events in a single process with multi-threading."""

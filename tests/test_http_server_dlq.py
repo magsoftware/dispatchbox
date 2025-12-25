@@ -177,16 +177,6 @@ def test_dead_events_stats_no_repository():
     assert "501" in str(bottle_response.status)
 
 
-def test_dead_events_stats_no_repository():
-    """Test GET /api/dead-events/stats returns 501 if no repository."""
-    server = HttpServer(host="127.0.0.1", port=8080)
-
-    result = server._dead_events_stats()
-    assert "error" in result
-    assert "Repository not available" in result["error"]
-    assert "501" in str(bottle_response.status)
-
-
 def test_dead_events_stats_with_filters(http_server_with_repo):
     """Test GET /api/dead-events/stats with filters."""
     server, mock_repo = http_server_with_repo

@@ -208,8 +208,6 @@ def test_run_loop_mark_retry_on_error(mock_repository, sample_event):
 
 def test_run_loop_skips_event_without_id(mock_repository):
     """Test run_loop skips events without ID."""
-    from unittest.mock import patch
-
     event_no_id = OutboxEvent(
         id=None,
         aggregate_type="order",

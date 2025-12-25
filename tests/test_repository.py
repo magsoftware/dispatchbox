@@ -292,8 +292,6 @@ def test_repository_add_connect_timeout_to_dsn_with_existing_timeout(mock_db_con
 
 def test_repository_establish_connection_raises_on_error(mock_db_connection):
     """Test _establish_connection raises OperationalError on connection failure."""
-    import psycopg2
-
     # Create repo with successful connection first
     repo = OutboxRepository("host=localhost dbname=test")
 
@@ -310,8 +308,6 @@ def test_repository_establish_connection_raises_on_error(mock_db_connection):
 
 def test_repository_reconnect_success(mock_db_connection, mock_cursor):
     """Test _reconnect successfully reconnects after connection loss."""
-    import psycopg2
-
     # First connection fails, second succeeds
     mock_conn1 = MagicMock()
     mock_conn1.close.side_effect = psycopg2.InterfaceError("Connection closed")
@@ -335,8 +331,6 @@ def test_repository_reconnect_success(mock_db_connection, mock_cursor):
 
 def test_repository_reconnect_raises_on_failure(mock_db_connection):
     """Test _reconnect raises OperationalError when reconnection fails."""
-    import psycopg2
-
     # Create repo with successful connection first
     repo = OutboxRepository("host=localhost dbname=test")
 
@@ -357,8 +351,6 @@ def test_repository_reconnect_raises_on_failure(mock_db_connection):
 
 def test_repository_check_connection_reconnects_on_failure(mock_db_connection, mock_cursor):
     """Test _check_connection reconnects when connection is lost."""
-    import psycopg2
-
     mock_conn = MagicMock()
     mock_conn.cursor.side_effect = psycopg2.OperationalError("Connection lost")
 

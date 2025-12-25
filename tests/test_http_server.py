@@ -37,8 +37,6 @@ def test_ready_endpoint_with_db_check():
 
 def test_ready_endpoint_db_not_connected():
     """Test /ready endpoint when DB is not connected."""
-    from bottle import response as bottle_response
-
     mock_db_check = Mock(return_value=False)
     server = HttpServer(port=0, db_check_fn=mock_db_check)
 
@@ -51,7 +49,6 @@ def test_ready_endpoint_db_not_connected():
 
 def test_ready_endpoint_db_check_exception():
     """Test /ready endpoint when DB check raises exception."""
-    from bottle import response as bottle_response
     import psycopg2
 
     mock_db_check = Mock(side_effect=psycopg2.OperationalError("Connection failed"))
@@ -74,8 +71,6 @@ def test_ready_endpoint_no_db_check():
 
 def test_metrics_endpoint_with_function():
     """Test /metrics endpoint with metrics function."""
-    from bottle import response as bottle_response
-
     mock_metrics = Mock(return_value="# HELP test_metric\n# TYPE test_metric counter\ntest_metric 1\n")
     server = HttpServer(port=0, metrics_fn=mock_metrics)
 
@@ -89,8 +84,6 @@ def test_metrics_endpoint_with_function():
 
 def test_metrics_endpoint_no_function():
     """Test /metrics endpoint without metrics function."""
-    from bottle import response as bottle_response
-
     server = HttpServer(port=0, metrics_fn=None)
 
     # Call endpoint - it should set status to 501
@@ -101,8 +94,6 @@ def test_metrics_endpoint_no_function():
 
 def test_metrics_endpoint_exception():
     """Test /metrics endpoint when metrics function raises exception."""
-    from bottle import response as bottle_response
-
     mock_metrics = Mock(side_effect=Exception("Metrics error"))
     server = HttpServer(port=0, metrics_fn=mock_metrics)
 

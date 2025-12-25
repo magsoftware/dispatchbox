@@ -39,7 +39,6 @@ def test_worker_loop_initializes_repository_and_worker(mocker):
 def test_worker_loop_uses_context_manager(mocker):
     """Test worker_loop uses repository as context manager."""
     import signal
-    from unittest.mock import patch
 
     mock_repository = MagicMock()
     mock_worker = MagicMock()
@@ -69,7 +68,6 @@ def test_worker_loop_uses_context_manager(mocker):
 def test_worker_signal_handler(mocker):
     """Test worker signal handler sets stop event."""
     import signal
-    from unittest.mock import patch
 
     from dispatchbox.supervisor import _setup_worker_signal_handlers
 
@@ -95,9 +93,6 @@ def test_worker_signal_handler(mocker):
 
 def test_wait_for_processes_handles_keyboard_interrupt(mocker):
     """Test _wait_for_processes handles KeyboardInterrupt gracefully."""
-    from multiprocessing import Event
-    from unittest.mock import patch
-
     from dispatchbox.supervisor import _wait_for_processes
 
     mock_process = MagicMock()
@@ -126,9 +121,7 @@ def test_wait_for_processes_handles_keyboard_interrupt(mocker):
 
 def test_setup_signal_handlers_calls_signal_handler(mocker):
     """Test _setup_signal_handlers signal handler is called."""
-    from multiprocessing import Event
     import signal
-    from unittest.mock import patch
 
     from dispatchbox.supervisor import _setup_signal_handlers
 
@@ -257,4 +250,4 @@ def test_start_processes_with_custom_parameters(mocker):
                     assert len(calls) == 2
                     # Check that worker_loop is the target
                     for call in calls:
-                        assert call[1]["target"] == worker_loop
+                        assert call[1]["target"] is worker_loop
