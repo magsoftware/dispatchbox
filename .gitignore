@@ -143,8 +143,10 @@ cython_debug/
 .DS_Store
 
 # Cursor IDE
-# .cursor/*
-# !.cursor/rules/**
+# Ignore everything in .cursor/ except rules/ directory and its contents
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 
 # VSCode IDE
 .vscode/*
