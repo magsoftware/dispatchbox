@@ -144,13 +144,13 @@ cython_debug/
 
 # Cursor IDE
 # Ignore everything in .cursor/ except rules/ directory and its contents
-.cursor/*
+.cursor/**
 !.cursor/rules/
 !.cursor/rules/**
 
 # VSCode IDE
-# .vscode/**
-# !.vscode/tasks.json
+.vscode/**
+!.vscode/tasks.json
 
 # uv
 .uv/
