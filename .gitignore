@@ -149,8 +149,8 @@ cython_debug/
 !.cursor/rules/**
 
 # VSCode IDE
-.vscode/*
-!.vscode/tasks.json
+# .vscode/**
+# !.vscode/tasks.json
 
 # uv
 .uv/

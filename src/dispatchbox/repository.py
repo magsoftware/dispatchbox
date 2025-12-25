@@ -238,11 +238,11 @@ class OutboxRepository:
         logger.warning("Database connection lost, attempting to reconnect...")
         try:
             self.conn.close()
-        # Catching generic Exception is intentional here for cleanup safety:
+        # Catching specific psycopg2 exceptions for cleanup safety:
         # - Connection may already be closed or in an invalid state
         # - Prevents cleanup failures from blocking reconnection attempts
         # - Ensures reconnection proceeds regardless of close() outcome
-        except Exception:
+        except (psycopg2.InterfaceError, psycopg2.OperationalError):
             pass
 
         try:

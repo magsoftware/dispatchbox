@@ -6,6 +6,7 @@ import sys
 from typing import Callable, Optional
 
 from loguru import logger
+import psycopg2
 
 from dispatchbox.config import (
     DEFAULT_BATCH_SIZE,
@@ -114,11 +115,12 @@ def create_db_check_function(dsn: str) -> Callable[[], bool]:
             is_connected = repo.is_connected()
             repo.close()
             return is_connected
-        # Catching generic Exception is intentional here for security reasons:
-        # - Prevents information leakage about specific failure types (connection errors, timeout errors, etc.)
-        # - Returns False for any connection failure, maintaining consistent security posture
-        # - Protects against revealing internal database connection details
-        except Exception:
+        # Catching psycopg2.Error covers all database-related errors:
+        # - OperationalError: connection failures, timeouts
+        # - InterfaceError: connection already closed, invalid state
+        # - Other psycopg2 errors: all database operation failures
+        # Returns False for any database error, maintaining consistent security posture
+        except (psycopg2.Error, ValueError):
             return False
 
     return check_db

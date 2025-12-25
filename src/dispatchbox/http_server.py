@@ -7,6 +7,7 @@ from typing import Any, Callable, List, Optional
 
 from bottle import Bottle, HTTPError, request, response, run
 from loguru import logger
+import psycopg2
 
 
 class HttpServer:
@@ -106,11 +107,12 @@ class HttpServer:
                 else:
                     response.status = 503
                     return {"status": "not ready", "reason": "database not connected"}
-            # Catching generic Exception is intentional here for security reasons:
-            # - Prevents information leakage about specific failure types (connection errors, timeout errors, etc.)
-            # - Returns consistent error response for any readiness check failure
-            # - Protects against revealing internal database connection details
-            except Exception as e:
+            # Catching psycopg2.Error covers all database-related errors:
+            # - OperationalError: connection failures, timeouts
+            # - InterfaceError: connection already closed, invalid state
+            # - Other psycopg2 errors: all database operation failures
+            # Returns consistent error response for any database check failure
+            except psycopg2.Error as e:
                 logger.error("Error checking readiness: {}", e)
                 response.status = 503
                 return {"status": "not ready", "reason": str(e)}
@@ -160,11 +162,11 @@ class HttpServer:
                     port=self.port,
                     quiet=True,  # Disable Bottle's default logging
                 )
-            # Catching generic Exception is intentional here for server stability:
-            # - Prevents server thread from crashing on any unexpected error
-            # - Ensures all server errors are logged regardless of exception type
-            # - Protects against revealing internal server implementation details
-            except Exception as e:
+            # Catching specific exceptions for server stability:
+            # - OSError: port already in use, network errors
+            # - ValueError: invalid port/host configuration
+            # - Other unexpected errors are logged but don't crash the thread
+            except (OSError, ValueError) as e:
                 logger.error("HTTP server error: {}", e)
 
         self._server_thread = threading.Thread(target=_run_server, daemon=daemon)
@@ -243,11 +245,11 @@ class HttpServer:
         except ValueError as e:
             response.status = 400
             return {"error": str(e)}
-        # Catching generic Exception is intentional here for security reasons:
-        # - Prevents information leakage about specific failure types (database errors, serialization errors, etc.)
-        # - Returns consistent error response for any internal server error
-        # - Protects against revealing internal database or system implementation details
-        except Exception as e:
+        # Catching psycopg2.Error for database operations:
+        # - Covers all database-related errors (OperationalError, InterfaceError, etc.)
+        # - Returns consistent error response for any database error
+        # - Protects against revealing internal database implementation details
+        except psycopg2.Error as e:
             logger.error("Error listing dead events: {}", e)
             response.status = 500
             return {"error": "Internal server error"}
@@ -293,11 +295,11 @@ class HttpServer:
                 "aggregate_type": params["aggregate_type"],
                 "event_type": params["event_type"],
             }
-        # Catching generic Exception is intentional here for security reasons:
-        # - Prevents information leakage about specific failure types (database errors, query errors, etc.)
-        # - Returns consistent error response for any internal server error
-        # - Protects against revealing internal database or system implementation details
-        except Exception as e:
+        # Catching psycopg2.Error for database operations:
+        # - Covers all database-related errors (OperationalError, InterfaceError, etc.)
+        # - Returns consistent error response for any database error
+        # - Protects against revealing internal database implementation details
+        except psycopg2.Error as e:
             logger.error("Error getting dead events stats: {}", e)
             response.status = 500
             return {"error": "Internal server error"}
@@ -328,11 +330,11 @@ class HttpServer:
         except ValueError as e:
             response.status = 400
             return {"error": str(e)}
-        # Catching generic Exception is intentional here for security reasons:
-        # - Prevents information leakage about specific failure types (database errors, serialization errors, etc.)
-        # - Returns consistent error response for any internal server error
-        # - Protects against revealing internal database or system implementation details
-        except Exception as e:
+        # Catching psycopg2.Error for database operations:
+        # - Covers all database-related errors (OperationalError, InterfaceError, etc.)
+        # - Returns consistent error response for any database error
+        # - Protects against revealing internal database implementation details
+        except psycopg2.Error as e:
             logger.error("Error getting dead event {}: {}", event_id, e)
             response.status = 500
             return {"error": "Internal server error"}
@@ -363,11 +365,11 @@ class HttpServer:
         except ValueError as e:
             response.status = 400
             return {"error": str(e)}
-        # Catching generic Exception is intentional here for security reasons:
-        # - Prevents information leakage about specific failure types (database errors, transaction errors, etc.)
-        # - Returns consistent error response for any internal server error
-        # - Protects against revealing internal database or system implementation details
-        except Exception as e:
+        # Catching psycopg2.Error for database operations:
+        # - Covers all database-related errors (OperationalError, InterfaceError, etc.)
+        # - Returns consistent error response for any database error
+        # - Protects against revealing internal database implementation details
+        except psycopg2.Error as e:
             logger.error("Error retrying dead event {}: {}", event_id, e)
             response.status = 500
             return {"error": "Internal server error"}
@@ -439,11 +441,11 @@ class HttpServer:
         except ValueError as e:
             response.status = 400
             return {"error": str(e)}
-        # Catching generic Exception is intentional here for security reasons:
-        # - Prevents information leakage about specific failure types (database errors, transaction errors, etc.)
-        # - Returns consistent error response for any internal server error
-        # - Protects against revealing internal database or system implementation details
-        except Exception as e:
+        # Catching psycopg2.Error for database operations:
+        # - Covers all database-related errors (OperationalError, InterfaceError, etc.)
+        # - Returns consistent error response for any database error
+        # - Protects against revealing internal database implementation details
+        except psycopg2.Error as e:
             logger.error("Error retrying dead events batch: {}", e)
             response.status = 500
             return {"error": "Internal server error"}
