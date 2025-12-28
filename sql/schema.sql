@@ -14,7 +14,7 @@ CREATE TABLE outbox_event (
 );
 
 CREATE INDEX CONCURRENTLY idx_outbox_due
-  ON outbox_event (status, next_run_at)
+  ON outbox_event (next_run_at ASC)
   WHERE status IN ('pending','retry');
 
 
@@ -30,4 +30,3 @@ VALUES
 ('order', '1004', 'order.created', '{"orderId": "1004", "customerId": "C004", "totalCents": 3000}'::jsonb, 'done', 1, now()),
 ('invoice', '2003', 'invoice.generated', '{"invoiceId": "2003", "orderId": "1003", "amountCents": 12000}'::jsonb, 'retry', 1, now() - interval '30 seconds'),
 ('user', 'U003', 'user.registered', '{"userId": "U003", "email": "user3@example.com"}'::jsonb, 'dead', 4, now());
-

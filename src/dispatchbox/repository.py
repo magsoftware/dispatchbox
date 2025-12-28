@@ -22,7 +22,7 @@ class OutboxRepository:
         FROM outbox_event
         WHERE status IN ('pending','retry')
           AND next_run_at <= now()
-        ORDER BY id
+        ORDER BY next_run_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT %s;
     """
