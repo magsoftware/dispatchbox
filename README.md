@@ -2,6 +2,8 @@
 
 Dispatchbox is a high-performance outbox pattern worker for PostgreSQL designed to reliably process events from an outbox table. It implements the transactional outbox pattern, ensuring that events published within database transactions are eventually processed and delivered, even in the face of failures.
 
+This project was inspired by the following article: [You Don't Need Kafka: Your Database Is Already an Event Log](https://medium.com/@toyezyadav/you-dont-need-kafka-your-database-is-already-an-event-log-08a3f0b0aba5).
+
 ## Overview
 
 The outbox pattern is a critical component of event-driven architectures, solving the dual-write problem by ensuring that events are written to the database as part of the same transaction that updates business data. Dispatchbox then asynchronously processes these events, guaranteeing at-least-once delivery semantics.
@@ -102,7 +104,7 @@ python scripts/generate_outbox_db.py
 **Option C: Use provided sample data**
 
 ```bash
-psql -U postgres -d outbox -f sql/insert_outbox.sql
+psql -U postgres -d outbox -f sql/insert.sql
 ```
 
 ## Usage
@@ -244,8 +246,8 @@ outbox/
 │   ├── generate_outbox_db.py
 │   └── generate_outbox_sql.py
 ├── sql/                       # SQL scripts
-│   ├── schema.sql
-│   └── insert_outbox.sql
+│   ├── schema.sql            # Main schema with archive table and function
+│   └── insert.sql            # Sample data for testing
 ├── docs/                      # Documentation
 │   ├── BOTTLE_DECORATORS_EXPLANATION.md  # Bottle decorators design decision
 │   ├── DEAD_LETTER_QUEUE.md   # Dead Letter Queue documentation
@@ -358,21 +360,23 @@ sequenceDiagram
     end
 ```
 
-
 ### Database Connection Management
 
 **Connection Architecture:**
+
 - Each worker process maintains **one dedicated database connection** throughout its lifetime
 - Connections are established during `OutboxRepository` initialization with configurable timeouts
 - The connection is managed using a context manager (`with repository:`) ensuring proper cleanup on shutdown
 
 **Connection Resilience:**
+
 - **Health checks** are performed before every database operation using `SELECT 1`
 - If a connection is lost, **automatic reconnection** is attempted with exponential backoff
 - Connection status can be checked via `is_connected()` method (used by readiness probes)
 - Failed reconnection attempts are logged and operations are retried
 
 **Transaction Management:**
+
 - All database operations use **manual transaction control** (`autocommit = False`)
 - Each operation (fetch, mark_success, mark_retry) performs its own `COMMIT`
 - `FOR UPDATE SKIP LOCKED` ensures safe concurrent access:
@@ -381,12 +385,14 @@ sequenceDiagram
   - This enables true parallel processing across processes
 
 **Query Timeouts:**
+
 - **Connection timeout** (default: 10s) - limits time to establish connection
 - **Query timeout** (default: 30s) - set via `SET statement_timeout` before each query
 - Timeouts prevent workers from hanging indefinitely on slow or stuck queries
 - Timeout values are configurable per repository instance
 
 **Concurrency Model:**
+
 - **Process-level**: Multiple worker processes run independently, each with its own connection
 - **Thread-level**: Within each process, multiple threads process events in parallel
 - **Database-level**: PostgreSQL's row-level locking (`FOR UPDATE SKIP LOCKED`) ensures no conflicts
@@ -415,6 +421,7 @@ Besides worker processes, database connections are also used by:
    - This ensures API requests don't interfere with worker processing
 
 **Connection Lifecycle Summary:**
+
 - **Worker processes**: Long-lived connections (one per process, lifetime = process lifetime)
 - **HTTP readiness checks**: Short-lived connections (created and closed per request)
 - **HTTP DLQ API**: Short-lived connections (created and closed per request)
@@ -428,6 +435,52 @@ Events that exceed the maximum retry attempts are marked as `dead` and stored in
 - Manually retry after fixing underlying issues
 
 See [Dead Letter Queue documentation](docs/DEAD_LETTER_QUEUE.md) for details on current implementation and future enhancements.
+
+## Event Archiving
+
+Dispatchbox includes an archiving mechanism to keep the main `outbox_event` table lean by moving completed events to an archive table.
+
+### Archive Table
+
+The `outbox_event_archive` table stores completed events with an additional `archived_at` timestamp. This allows you to:
+
+- Keep historical records for auditing and compliance
+- Maintain query performance on the main table
+- Analyze processing patterns over time
+
+### Archive Function
+
+The `archive_outbox_events()` function moves events with status `'done'` that are older than the specified retention period (default: 7 days) to the archive table. The function:
+
+- Processes events in batches of 5000 to prevent long locks
+- Moves all event data including payload, status, and attempts
+- Can be scheduled using `pg_cron` for automatic archiving
+
+### Setting Up Automatic Archiving
+
+To enable automatic archiving, register a cron job in PostgreSQL (requires `pg_cron` extension):
+
+```sql
+-- Register daily archiving job (runs at 3:00 AM)
+-- Note: Run this in the 'postgres' database or where pg_cron is installed
+SELECT cron.schedule(
+    'archive-outbox-job',
+    '0 3 * * *',
+    'SELECT archive_outbox_events(7)'
+);
+```
+
+You can also call the function manually:
+
+```sql
+-- Archive events older than 7 days
+SELECT archive_outbox_events(7);
+
+-- Archive events older than 30 days
+SELECT archive_outbox_events(30);
+```
+
+The archive function is defined in `sql/schema.sql` and is created automatically when you set up the database schema.
 
 ## HTTP Endpoints
 
@@ -488,6 +541,7 @@ Dispatchbox includes an HTTP server (enabled by default) that provides:
 ### Configuration
 
 The HTTP server runs in a background thread and doesn't block worker processes. It can be:
+
 - Configured via `--http-host` and `--http-port` CLI options
 - Disabled with `--disable-http` flag
 - Used for Kubernetes health checks and monitoring

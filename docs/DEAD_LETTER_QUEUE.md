@@ -33,8 +33,8 @@
 # W OutboxRepository:
 
 def fetch_dead_events(
-    self, 
-    limit: int = 100, 
+    self,
+    limit: int = 100,
     offset: int = 0,
     aggregate_type: Optional[str] = None,
     event_type: Optional[str] = None,
@@ -42,14 +42,14 @@ def fetch_dead_events(
 ) -> List[OutboxEvent]:
     """
     Fetch dead events for review.
-    
+
     Args:
         limit: Maximum number of events to fetch
         offset: Offset for pagination
         aggregate_type: Filter by aggregate type (optional)
         event_type: Filter by event type (optional)
         since: Only events marked as dead after this time (optional)
-    
+
     Returns:
         List of dead OutboxEvent instances
     """
@@ -68,13 +68,13 @@ def count_dead_events(
 def retry_dead_event(self, event_id: int) -> bool:
     """
     Reset a dead event to 'pending' for retry.
-    
+
     Args:
         event_id: ID of dead event to retry
-    
+
     Returns:
         True if event was successfully reset, False if not found or not dead
-    
+
     Raises:
         ValueError: If event is not in 'dead' status
     """
@@ -82,12 +82,12 @@ def retry_dead_event(self, event_id: int) -> bool:
     pass
 
 def retry_dead_events_batch(
-    self, 
+    self,
     event_ids: List[int]
 ) -> int:
     """
     Reset multiple dead events to 'pending'.
-    
+
     Returns:
         Number of events successfully reset
     """
@@ -167,7 +167,7 @@ dispatchbox_event_attempts_before_dead{event_type}  # Histogram
 if event marked as dead:
     # Emit metric
     dead_events_counter.inc(labels={'event_type': event.event_type})
-    
+
     # Optional: Send alert (email, Slack, PagerDuty)
     if dead_events_count > threshold:
         send_alert(f"High number of dead events: {dead_events_count}")
@@ -183,7 +183,7 @@ if event marked as dead:
 
 ```sql
 -- Dodać kolumnę do tabeli (migration):
-ALTER TABLE outbox_event 
+ALTER TABLE outbox_event
 ADD COLUMN last_error TEXT,
 ADD COLUMN last_error_at TIMESTAMPTZ;
 
@@ -209,12 +209,12 @@ def cleanup_old_dead_events(
 ) -> int:
     """
     Delete dead events older than specified days.
-    
+
     Returns:
         Number of events deleted
     """
-    # DELETE FROM outbox_event 
-    # WHERE status = 'dead' 
+    # DELETE FROM outbox_event
+    # WHERE status = 'dead'
     #   AND created_at < now() - interval '%s days'
 ```
 
@@ -272,13 +272,23 @@ else:
 
 ---
 
+## Archiwizacja
+
+**Uwaga:** W schemacie bazy danych (`sql/schema.sql`) jest już zaimplementowana archiwizacja dla eventów ze statusem `'done'`:
+
+- Tabela `outbox_event_archive` przechowuje zarchiwizowane eventy
+- Funkcja `archive_outbox_events(retention_days)` przenosi stare eventy `'done'` do archiwum
+- Można zaplanować automatyczną archiwizację używając `pg_cron`
+
+**Rozważenie:** Można rozszerzyć funkcję archiwizującą, aby również przenosiła eventy `'dead'` po określonym czasie, zanim zostaną usunięte. To pozwoliłoby zachować historię problematycznych eventów dla analizy.
+
 ## Pytania do rozważenia
 
 1. **Czy dead eventy powinny być automatycznie eksportowane** do osobnej tabeli/pliku?
 2. **Czy potrzebujemy retention policy** - jak długo przechowywać dead eventy?
 3. **Czy retry powinien resetować attempts** do 0 czy zachować historię?
 4. **Czy potrzebujemy webhook** gdy event staje się dead?
-5. **Czy dead eventy powinny być archiwizowane** przed usunięciem?
+5. **Czy dead eventy powinny być archiwizowane** przed usunięciem? (Patrz sekcja Archiwizacja powyżej)
 
 ---
 
@@ -292,4 +302,3 @@ else:
 3. Dodać CLI commands dla łatwego zarządzania
 
 **Priorytet:** Wysoki - to jest krytyczne dla production, żeby móc zarządzać problematycznymi eventami.
-
