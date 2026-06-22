@@ -219,6 +219,21 @@ uv run pytest tests/test_models.py::test_from_dict_with_all_fields
 uv run pytest -v
 ```
 
+### Load tests
+
+Load tests use a real PostgreSQL database and synthetic handlers. They can measure backlog drain throughput,
+sustained producer traffic, and process/batch-size matrices:
+
+```bash
+make load-drain
+make load-sustained
+make load-matrix
+make load-lease-recovery
+```
+
+These commands truncate the configured outbox tables. Use a dedicated database and see
+[`load_tests/README.md`](load_tests/README.md) before running them.
+
 ## Project Structure
 
 ```
