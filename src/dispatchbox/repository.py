@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Repository for outbox events database operations."""
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
+from uuid import uuid4
 
 from loguru import logger
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from dispatchbox.config import DEFAULT_MAX_ATTEMPTS
+from dispatchbox.config import DEFAULT_LEASE_SECONDS, DEFAULT_MAX_ATTEMPTS
 from dispatchbox.models import OutboxEvent
 
 
@@ -16,22 +18,43 @@ class OutboxRepository:
     """Repository for managing outbox events in the database."""
 
     # SQL queries as class constants
-    FETCH_PENDING_SQL = """
-        SELECT id, aggregate_type, aggregate_id, event_type, payload,
-               status, attempts, next_run_at, created_at
-        FROM outbox_event
-        WHERE status IN ('pending','retry')
-          AND next_run_at <= now()
-        ORDER BY next_run_at ASC
-        FOR UPDATE SKIP LOCKED
-        LIMIT %s;
+    FETCH_AND_CLAIM_SQL = """
+        WITH picked AS (
+            SELECT id
+            FROM outbox_event
+            WHERE status IN ('pending', 'retry', 'processing')
+              AND next_run_at <= now()
+            ORDER BY next_run_at ASC
+            LIMIT %s
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE outbox_event e
+        SET status = 'processing',
+            claim_token = %s,
+            next_run_at = now() + (%s * interval '1 second')
+        FROM picked
+        WHERE e.id = picked.id
+        RETURNING e.id, e.aggregate_type, e.aggregate_id, e.event_type,
+                  e.payload, e.status, e.attempts, e.next_run_at, e.created_at,
+                  e.claim_token;
+    """
+
+    RENEW_CLAIM_SQL = """
+        UPDATE outbox_event
+        SET next_run_at = now() + (%s * interval '1 second')
+        WHERE id = %s
+          AND status = 'processing'
+          AND claim_token = %s;
     """
 
     MARK_SUCCESS_SQL = """
         UPDATE outbox_event
         SET status = 'done',
-            attempts = attempts + 1
-        WHERE id = %s;
+            attempts = attempts + 1,
+            claim_token = NULL
+        WHERE id = %s
+          AND status = 'processing'
+          AND claim_token = %s;
     """
 
     MARK_RETRY_SQL = """
@@ -41,11 +64,14 @@ class OutboxRepository:
             ELSE 'retry'
         END,
         attempts = attempts + 1,
+        claim_token = NULL,
         next_run_at = CASE
             WHEN attempts + 1 >= %s THEN next_run_at
             ELSE %s
         END
-        WHERE id = %s;
+        WHERE id = %s
+          AND status = 'processing'
+          AND claim_token = %s;
     """
 
     CHECK_STATUS_SQL = "SELECT status FROM outbox_event WHERE id = %s;"
@@ -111,6 +137,7 @@ class OutboxRepository:
         connect_timeout: int,
         query_timeout: int,
         max_attempts: int,
+        lease_seconds: int,
     ) -> None:
         """
         Validate all initialization parameters.
@@ -120,6 +147,7 @@ class OutboxRepository:
             connect_timeout: Connection timeout in seconds
             query_timeout: Query timeout in seconds
             max_attempts: Maximum number of retry attempts
+            lease_seconds: Claim duration before an event can be reclaimed
 
         Raises:
             ValueError: If any parameter is invalid
@@ -132,6 +160,8 @@ class OutboxRepository:
             raise ValueError("query_timeout must be non-negative")
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
+        if lease_seconds < 1:
+            raise ValueError("lease_seconds must be at least 1")
 
     def _add_connect_timeout_to_dsn(self, dsn: str, timeout: int) -> str:
         """
@@ -177,6 +207,7 @@ class OutboxRepository:
         connect_timeout: int = 10,
         query_timeout: int = 30,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        lease_seconds: int = DEFAULT_LEASE_SECONDS,
     ) -> None:
         """
         Initialize OutboxRepository.
@@ -188,18 +219,26 @@ class OutboxRepository:
             query_timeout: Query timeout in seconds (default: 30)
             max_attempts: Maximum number of retry attempts before marking event
                 as dead (default: 5)
+            lease_seconds: Claim duration in seconds (default: 300)
 
         Raises:
             ValueError: If DSN is empty or invalid
             psycopg2.OperationalError: If connection cannot be established
         """
         self._validate_dsn(dsn)
-        self._validate_parameters(retry_backoff_seconds, connect_timeout, query_timeout, max_attempts)
+        self._validate_parameters(
+            retry_backoff_seconds,
+            connect_timeout,
+            query_timeout,
+            max_attempts,
+            lease_seconds,
+        )
 
         self.dsn: str = dsn.strip()
         self.retry_backoff: int = retry_backoff_seconds
         self.query_timeout: int = query_timeout
         self.max_attempts: int = max_attempts
+        self.lease_seconds: int = lease_seconds
 
         dsn_with_timeout = self._add_connect_timeout_to_dsn(self.dsn, connect_timeout)
         self.conn: Any = self._establish_connection(dsn_with_timeout)
@@ -214,6 +253,27 @@ class OutboxRepository:
         timeout_ms = self.query_timeout * 1000  # Convert to milliseconds
         cur.execute(self.SET_TIMEOUT_SQL, (timeout_ms,))
 
+    def _rollback(self) -> None:
+        """Rollback the current transaction without masking the original error."""
+        try:
+            self.conn.rollback()
+        except (psycopg2.Error, AttributeError):
+            logger.exception("Failed to rollback database transaction")
+
+    @contextmanager
+    def _transaction_cursor(self, cursor_factory: Any = None) -> Any:
+        """Yield a cursor and always finish the transaction with commit or rollback."""
+        try:
+            self._check_connection()
+            cursor_kwargs = {"cursor_factory": cursor_factory} if cursor_factory else {}
+            with self.conn.cursor(**cursor_kwargs) as cur:
+                self._set_query_timeout(cur)
+                yield cur
+            self.conn.commit()
+        except Exception:
+            self._rollback()
+            raise
+
     def is_connected(self) -> bool:
         """
         Check if database connection is alive (without reconnecting).
@@ -224,8 +284,10 @@ class OutboxRepository:
         try:
             with self.conn.cursor() as cur:
                 cur.execute(self.CHECK_CONNECTION_SQL)
+            self.conn.commit()
             return True
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        except psycopg2.Error:
+            self._rollback()
             return False
 
     def _reconnect(self) -> None:
@@ -267,46 +329,76 @@ class OutboxRepository:
                 cur.execute(self.CHECK_CONNECTION_SQL)
         except (psycopg2.OperationalError, psycopg2.InterfaceError):
             self._reconnect()
+        except psycopg2.Error:
+            self._rollback()
+            with self.conn.cursor() as cur:
+                cur.execute(self.CHECK_CONNECTION_SQL)
 
     def fetch_pending(self, batch_size: int) -> List[OutboxEvent]:
         """
-        Fetch a batch of pending/retry events from the database.
+        Fetch and atomically claim a batch of pending/retry events.
+
+        Uses UPDATE ... RETURNING to atomically set status='processing'
+        in the same transaction as the SELECT FOR UPDATE.
+
+        A unique claim token fences stale workers from completing a newer
+        claim. Expired processing events can be reclaimed after next_run_at.
 
         Args:
             batch_size: Maximum number of events to fetch
 
         Returns:
-            List of OutboxEvent instances
+            List of OutboxEvent instances with status='processing'
         """
         if batch_size < 1:
             raise ValueError("batch_size must be at least 1")
 
-        self._check_connection()
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            self._set_query_timeout(cur)
-            cur.execute(self.FETCH_PENDING_SQL, (batch_size,))
+        claim_token = str(uuid4())
+        with self._transaction_cursor(RealDictCursor) as cur:
+            cur.execute(
+                self.FETCH_AND_CLAIM_SQL,
+                (batch_size, claim_token, self.lease_seconds),
+            )
             rows = cur.fetchall()
-            self.conn.commit()
-            return [OutboxEvent.from_dict(dict(row)) for row in rows]
+        return [OutboxEvent.from_dict(dict(row)) for row in rows]
 
-    def mark_success(self, event_id: int) -> None:
+    def renew_claim(self, event_id: int, claim_token: str) -> bool:
+        """Extend a claim lease if the caller still owns the event."""
+        self._validate_claim(event_id, claim_token)
+        with self._transaction_cursor() as cur:
+            cur.execute(
+                self.RENEW_CLAIM_SQL,
+                (self.lease_seconds, event_id, claim_token),
+            )
+            renewed = cur.rowcount > 0
+        return renewed
+
+    def _validate_claim(self, event_id: int, claim_token: str) -> None:
+        """Validate identifiers required for fenced claim operations."""
+        if event_id is None or event_id < 1:
+            raise ValueError("event_id must be a positive integer")
+        if not claim_token or not claim_token.strip():
+            raise ValueError("claim_token cannot be empty")
+
+    def mark_success(self, event_id: int, claim_token: str) -> bool:
         """
         Mark an event as successfully processed.
 
         Args:
             event_id: ID of the event to mark as successful
+            claim_token: Token returned when the event was claimed
+
+        Returns:
+            True if this claim was finalized, False if ownership was lost
 
         Raises:
-            ValueError: If event_id is invalid
+            ValueError: If the event ID or claim token is invalid
         """
-        if event_id is None or event_id < 1:
-            raise ValueError("event_id must be a positive integer")
-
-        self._check_connection()
-        with self.conn.cursor() as cur:
-            self._set_query_timeout(cur)
-            cur.execute(self.MARK_SUCCESS_SQL, (event_id,))
-        self.conn.commit()
+        self._validate_claim(event_id, claim_token)
+        with self._transaction_cursor() as cur:
+            cur.execute(self.MARK_SUCCESS_SQL, (event_id, claim_token))
+            updated = cur.rowcount > 0
+        return updated
 
     def _calculate_next_run_at(self) -> datetime:
         """
@@ -334,32 +426,33 @@ class OutboxRepository:
                 self.max_attempts,
             )
 
-    def mark_retry(self, event_id: int) -> None:
+    def mark_retry(self, event_id: int, claim_token: str) -> bool:
         """
         Mark an event for retry with updated next_run_at timestamp.
         If max_attempts is exceeded, mark event as 'dead' instead.
 
         Args:
             event_id: ID of the event to mark for retry
+            claim_token: Token returned when the event was claimed
+
+        Returns:
+            True if this claim was finalized, False if ownership was lost
 
         Raises:
-            ValueError: If event_id is invalid
+            ValueError: If the event ID or claim token is invalid
         """
-        if event_id is None or event_id < 1:
-            raise ValueError("event_id must be a positive integer")
-
-        self._check_connection()
+        self._validate_claim(event_id, claim_token)
         next_run_at = self._calculate_next_run_at()
 
-        with self.conn.cursor() as cur:
-            self._set_query_timeout(cur)
+        with self._transaction_cursor() as cur:
             cur.execute(
                 self.MARK_RETRY_SQL,
-                (self.max_attempts, self.max_attempts, next_run_at, event_id),
+                (self.max_attempts, self.max_attempts, next_run_at, event_id, claim_token),
             )
-            if cur.rowcount > 0:
+            updated = cur.rowcount > 0
+            if updated:
                 self._log_if_dead(event_id, cur)
-        self.conn.commit()
+        return updated
 
     def close(self) -> None:
         """Close the database connection."""
@@ -428,17 +521,13 @@ class OutboxRepository:
         if offset < 0:
             raise ValueError("offset must be non-negative")
 
-        self._check_connection()
-
         sql, params = self._build_dead_events_sql(aggregate_type, event_type)
         params.extend([limit, offset])
 
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            self._set_query_timeout(cur)
+        with self._transaction_cursor(RealDictCursor) as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
-            self.conn.commit()
-            return [OutboxEvent.from_dict(dict(row)) for row in rows]
+        return [OutboxEvent.from_dict(dict(row)) for row in rows]
 
     def _build_count_dead_events_sql(
         self,
@@ -483,16 +572,12 @@ class OutboxRepository:
         Returns:
             Number of dead events
         """
-        self._check_connection()
-
         sql, params = self._build_count_dead_events_sql(aggregate_type, event_type)
 
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            self._set_query_timeout(cur)
+        with self._transaction_cursor(RealDictCursor) as cur:
             cur.execute(sql, tuple(params) if params else None)
             result = cur.fetchone()
-            self.conn.commit()
-            return result["count"] if result else 0
+        return result["count"] if result else 0
 
     def get_dead_event(self, event_id: int) -> Optional[OutboxEvent]:
         """
@@ -507,15 +592,12 @@ class OutboxRepository:
         if event_id is None or event_id < 1:
             raise ValueError("event_id must be a positive integer")
 
-        self._check_connection()
-        with self.conn.cursor(cursor_factory=RealDictCursor) as cur:
-            self._set_query_timeout(cur)
+        with self._transaction_cursor(RealDictCursor) as cur:
             cur.execute(self.FETCH_DEAD_EVENT_BY_ID_SQL, (event_id,))
             row = cur.fetchone()
-            self.conn.commit()
-            if row:
-                return OutboxEvent.from_dict(dict(row))
-            return None
+        if row:
+            return OutboxEvent.from_dict(dict(row))
+        return None
 
     def retry_dead_event(self, event_id: int) -> bool:
         """
@@ -533,12 +615,10 @@ class OutboxRepository:
         if event_id is None or event_id < 1:
             raise ValueError("event_id must be a positive integer")
 
-        self._check_connection()
-        with self.conn.cursor() as cur:
-            self._set_query_timeout(cur)
+        with self._transaction_cursor() as cur:
             cur.execute(self.RETRY_DEAD_EVENT_SQL, (event_id,))
-            self.conn.commit()
-            return cur.rowcount > 0
+            updated = cur.rowcount > 0
+        return updated
 
     def retry_dead_events_batch(self, event_ids: List[int]) -> int:
         """
@@ -559,11 +639,8 @@ class OutboxRepository:
         if any(eid is None or eid < 1 for eid in event_ids):
             raise ValueError("All event_ids must be positive integers")
 
-        self._check_connection()
-
-        with self.conn.cursor() as cur:
-            self._set_query_timeout(cur)
+        with self._transaction_cursor() as cur:
             # Use ANY(%s) with array parameter for better performance
             cur.execute(self.RETRY_DEAD_EVENTS_BATCH_SQL, (event_ids,))
-            self.conn.commit()
-            return cur.rowcount
+            updated = cur.rowcount
+        return updated

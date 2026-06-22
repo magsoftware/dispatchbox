@@ -55,7 +55,8 @@ class MockRow:
 
 def test_fetch_pending_with_results(mock_db_connection, mock_cursor, sample_event_dict):
     """Test fetch_pending returns OutboxEvent list when rows are present."""
-    mock_row = MockRow(sample_event_dict)
+    claimed_event = {**sample_event_dict, "status": "processing", "claim_token": "claim-123"}
+    mock_row = MockRow(claimed_event)
     mock_cursor.fetchall.return_value = [mock_row]
 
     repo = OutboxRepository("host=localhost dbname=test")
@@ -65,10 +66,12 @@ def test_fetch_pending_with_results(mock_db_connection, mock_cursor, sample_even
     assert isinstance(events[0], OutboxEvent)
     assert events[0].id == 1
     assert events[0].event_type == "order.created"
+    assert events[0].status == "processing"
+    assert events[0].claim_token == "claim-123"
     # _check_connection() calls execute('SELECT 1'), then SET statement_timeout, then actual query
     assert mock_cursor.execute.call_count == 3
     # Verify the actual query was called (last call)
-    assert "SELECT id" in mock_cursor.execute.call_args_list[2][0][0]
+    assert "WITH picked" in mock_cursor.execute.call_args_list[2][0][0]
     mock_db_connection.commit.assert_called()
 
 
@@ -83,7 +86,7 @@ def test_fetch_pending_empty_result(mock_db_connection, mock_cursor):
     # _check_connection() calls execute('SELECT 1'), then SET statement_timeout, then actual query
     assert mock_cursor.execute.call_count == 3
     # Verify the actual query was called (last call)
-    assert "SELECT id" in mock_cursor.execute.call_args_list[2][0][0]
+    assert "WITH picked" in mock_cursor.execute.call_args_list[2][0][0]
     mock_db_connection.commit.assert_called()
 
 
@@ -100,9 +103,12 @@ def test_fetch_pending_calls_correct_sql(mock_db_connection, mock_cursor):
     assert call_args is not None
     # Verify it uses the class constant (normalize whitespace for comparison)
     sql_called = call_args[0][0].strip()
-    sql_expected = OutboxRepository.FETCH_PENDING_SQL.strip()
+    sql_expected = OutboxRepository.FETCH_AND_CLAIM_SQL.strip()
     assert sql_called == sql_expected
-    assert call_args[0][1] == (5,)  # batch_size parameter
+    params = call_args[0][1]
+    assert params[0] == 5
+    assert isinstance(params[1], str)  # unique claim token
+    assert params[2] == 300  # lease duration
 
 
 def test_fetch_pending_multiple_events(mock_db_connection, mock_cursor, sample_event_dict):
@@ -143,8 +149,9 @@ def test_fetch_pending_multiple_events(mock_db_connection, mock_cursor, sample_e
 
 def test_mark_success(mock_db_connection, mock_cursor):
     """Test mark_success updates event status."""
+    mock_cursor.rowcount = 1
     repo = OutboxRepository("host=localhost dbname=test")
-    repo.mark_success(123)
+    assert repo.mark_success(123, "claim-123") is True
 
     # _check_connection() calls execute('SELECT 1'), then SET statement_timeout, then UPDATE
     assert mock_cursor.execute.call_count == 3
@@ -153,8 +160,32 @@ def test_mark_success(mock_db_connection, mock_cursor):
     sql = call_args[0][0]
     assert "UPDATE" in sql
     assert "status = 'done'" in sql
-    assert call_args[0][1] == (123,)
+    assert call_args[0][1] == (123, "claim-123")
+    assert "claim_token = %s" in sql
     mock_db_connection.commit.assert_called()
+
+
+def test_mark_success_rejects_stale_claim(mock_db_connection, mock_cursor):
+    """A stale token cannot finalize an event reclaimed by another worker."""
+    mock_cursor.rowcount = 0
+    repo = OutboxRepository("host=localhost dbname=test")
+
+    assert repo.mark_success(123, "stale-token") is False
+    sql, params = mock_cursor.execute.call_args_list[2][0]
+    assert "status = 'processing'" in sql
+    assert "claim_token = %s" in sql
+    assert params == (123, "stale-token")
+
+
+def test_renew_claim(mock_db_connection, mock_cursor):
+    """Lease renewal is fenced by the current claim token."""
+    mock_cursor.rowcount = 1
+    repo = OutboxRepository("host=localhost dbname=test", lease_seconds=60)
+
+    assert repo.renew_claim(123, "claim-123") is True
+    sql, params = mock_cursor.execute.call_args_list[2][0]
+    assert "claim_token = %s" in sql
+    assert params == (60, 123, "claim-123")
 
 
 def test_mark_retry(mock_db_connection, mock_cursor):
@@ -170,7 +201,7 @@ def test_mark_retry(mock_db_connection, mock_cursor):
         mock_datetime.timedelta = timedelta
         mock_datetime.timezone = timezone
 
-        repo.mark_retry(456)
+        assert repo.mark_retry(456, "claim-456") is True
 
         # _check_connection() calls execute('SELECT 1'), then SET statement_timeout, then UPDATE, then SELECT status
         assert mock_cursor.execute.call_count == 4
@@ -245,7 +276,7 @@ def test_mark_retry_exceeds_max_attempts(mock_db_connection, mock_cursor):
         mock_datetime.timedelta = timedelta
         mock_datetime.timezone = timezone
 
-        repo.mark_retry(789)
+        assert repo.mark_retry(789, "claim-789") is True
 
         # Verify UPDATE was called with CASE statement
         assert mock_cursor.execute.call_count == 4
@@ -261,6 +292,12 @@ def test_repository_init_invalid_max_attempts():
     """Test that max_attempts < 1 raises ValueError."""
     with pytest.raises(ValueError, match="max_attempts must be at least 1"):
         OutboxRepository("host=localhost dbname=test", max_attempts=0)
+
+
+def test_repository_init_invalid_lease_seconds():
+    """Test that lease_seconds must be positive."""
+    with pytest.raises(ValueError, match="lease_seconds must be at least 1"):
+        OutboxRepository("host=localhost dbname=test", lease_seconds=0)
 
 
 def test_repository_init_negative_connect_timeout():
@@ -384,13 +421,13 @@ def test_mark_success_invalid_event_id(mock_db_connection):
     repo = OutboxRepository("host=localhost dbname=test")
 
     with pytest.raises(ValueError, match="event_id must be a positive integer"):
-        repo.mark_success(0)
+        repo.mark_success(0, "claim")
 
     with pytest.raises(ValueError, match="event_id must be a positive integer"):
-        repo.mark_success(-1)
+        repo.mark_success(-1, "claim")
 
     with pytest.raises(ValueError, match="event_id must be a positive integer"):
-        repo.mark_success(None)
+        repo.mark_success(None, "claim")
 
 
 def test_mark_retry_invalid_event_id(mock_db_connection):
@@ -398,13 +435,34 @@ def test_mark_retry_invalid_event_id(mock_db_connection):
     repo = OutboxRepository("host=localhost dbname=test")
 
     with pytest.raises(ValueError, match="event_id must be a positive integer"):
-        repo.mark_retry(0)
+        repo.mark_retry(0, "claim")
 
     with pytest.raises(ValueError, match="event_id must be a positive integer"):
-        repo.mark_retry(-1)
+        repo.mark_retry(-1, "claim")
 
     with pytest.raises(ValueError, match="event_id must be a positive integer"):
-        repo.mark_retry(None)
+        repo.mark_retry(None, "claim")
+
+
+def test_claim_operations_reject_empty_token(mock_db_connection):
+    """Fenced updates require a non-empty claim token."""
+    repo = OutboxRepository("host=localhost dbname=test")
+
+    with pytest.raises(ValueError, match="claim_token cannot be empty"):
+        repo.mark_success(1, "")
+    with pytest.raises(ValueError, match="claim_token cannot be empty"):
+        repo.mark_retry(1, "   ")
+
+
+def test_transaction_rolls_back_on_query_error(mock_db_connection, mock_cursor):
+    """A failed statement does not leave the connection in an aborted transaction."""
+    mock_cursor.execute.side_effect = [None, None, psycopg2.DatabaseError("query failed")]
+    repo = OutboxRepository("host=localhost dbname=test")
+
+    with pytest.raises(psycopg2.DatabaseError, match="query failed"):
+        repo.fetch_pending(1)
+
+    mock_db_connection.rollback.assert_called_once()
 
 
 def test_is_connected(mock_db_connection, mock_cursor):

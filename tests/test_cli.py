@@ -316,6 +316,7 @@ class TestMain:
         args.processes = 4
         args.batch_size = 100
         args.poll_interval = 1.0
+        args.lease_seconds = 300
         args.dsn = "host=localhost dbname=test"
         mock_parse_args.return_value = args
 
@@ -326,7 +327,9 @@ class TestMain:
 
         mock_setup_logging.assert_called_once_with("INFO")
         mock_logger.info.assert_called_once()
-        mock_start_processes.assert_called_once_with("host=localhost dbname=test", 4, 100, 1.0)
+        mock_start_processes.assert_called_once_with(
+            "host=localhost dbname=test", 4, 100, 1.0, lease_seconds=300
+        )
         mock_http_server.stop.assert_called_once()
 
     @patch("dispatchbox.cli.parse_args")
@@ -344,6 +347,7 @@ class TestMain:
         args.processes = 4
         args.batch_size = 100
         args.poll_interval = 1.0
+        args.lease_seconds = 300
         args.dsn = "host=localhost dbname=test"
         mock_parse_args.return_value = args
 
@@ -371,6 +375,7 @@ class TestMain:
         args.processes = 4
         args.batch_size = 100
         args.poll_interval = 1.0
+        args.lease_seconds = 300
         args.dsn = "host=localhost dbname=test"
         mock_parse_args.return_value = args
 

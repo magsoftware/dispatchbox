@@ -2,6 +2,7 @@
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from multiprocessing import Event
+import time
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -137,7 +138,7 @@ def test_run_loop_fetches_and_processes_events(mock_repository, sample_event):
         worker.run_loop()
 
     mock_repository.fetch_pending.assert_called()
-    mock_repository.mark_success.assert_called_once_with(sample_event.id)
+    mock_repository.mark_success.assert_called_once_with(sample_event.id, sample_event.claim_token)
 
 
 def test_run_loop_mark_success_on_success(mock_repository, sample_event):
@@ -169,7 +170,7 @@ def test_run_loop_mark_success_on_success(mock_repository, sample_event):
     with patch("dispatchbox.worker.time.sleep", side_effect=stop_after_first):
         worker.run_loop()
 
-    mock_repository.mark_success.assert_called_once_with(sample_event.id)
+    mock_repository.mark_success.assert_called_once_with(sample_event.id, sample_event.claim_token)
     mock_repository.mark_retry.assert_not_called()
 
 
@@ -202,7 +203,7 @@ def test_run_loop_mark_retry_on_error(mock_repository, sample_event):
     with patch("dispatchbox.worker.time.sleep", side_effect=stop_after_first):
         worker.run_loop()
 
-    mock_repository.mark_retry.assert_called_once_with(sample_event.id)
+    mock_repository.mark_retry.assert_called_once_with(sample_event.id, sample_event.claim_token)
     mock_repository.mark_success.assert_not_called()
 
 
@@ -294,6 +295,7 @@ def test_run_loop_processes_multiple_events(mock_repository, sample_event):
         status="pending",
         attempts=0,
         next_run_at=Mock(),
+        claim_token="claim-token-2",
     )
 
     # Return events first, then empty to stop
@@ -337,3 +339,37 @@ def test_run_loop_processes_multiple_events(mock_repository, sample_event):
 
     # Should mark both events as success
     assert mock_repository.mark_success.call_count == 2
+
+
+def test_process_batch_renews_claim_for_long_running_handler(mock_repository, sample_event):
+    """A handler running beyond the heartbeat interval keeps its lease alive."""
+    mock_repository.lease_seconds = 0.03
+
+    def slow_handler(payload):
+        time.sleep(0.15)
+
+    worker = OutboxWorker(
+        batch_size=1,
+        poll_interval=0.01,
+        handlers={sample_event.event_type: slow_handler},
+        repository=mock_repository,
+    )
+
+    worker._process_batch([sample_event])
+
+    mock_repository.renew_claim.assert_called_with(sample_event.id, sample_event.claim_token)
+    mock_repository.mark_success.assert_called_once_with(sample_event.id, sample_event.claim_token)
+
+
+def test_finalize_does_not_overwrite_newer_claim(mock_repository, sample_event):
+    """A stale worker reports lost ownership instead of overwriting the newer claim."""
+    mock_repository.mark_success.return_value = False
+    future = Future()
+    future.set_result(None)
+    worker = OutboxWorker(batch_size=1, poll_interval=0.01, repository=mock_repository)
+
+    with patch("dispatchbox.worker.logger") as mock_logger:
+        worker._finalize_event(future, sample_event)
+
+    mock_repository.mark_success.assert_called_once_with(sample_event.id, sample_event.claim_token)
+    assert any("claim was lost" in str(call) for call in mock_logger.warning.call_args_list)

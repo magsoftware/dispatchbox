@@ -15,10 +15,11 @@ class OutboxEvent:
     aggregate_id: str
     event_type: str
     payload: Dict[str, Any]
-    status: Literal["pending", "retry", "done", "dead"]
+    status: Literal["pending", "retry", "processing", "done", "dead"]
     attempts: int
     next_run_at: datetime
     created_at: Optional[datetime] = None
+    claim_token: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "OutboxEvent":
@@ -45,6 +46,7 @@ class OutboxEvent:
             attempts=data.get("attempts", 0),
             next_run_at=next_run_at,
             created_at=data.get("created_at"),
+            claim_token=data.get("claim_token"),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -72,4 +74,6 @@ class OutboxEvent:
             result["created_at"] = (
                 self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at
             )
+        if self.claim_token is not None:
+            result["claim_token"] = self.claim_token
         return result

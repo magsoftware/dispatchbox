@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """OutboxWorker class for processing outbox events."""
 
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from multiprocessing import Event
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -70,6 +70,73 @@ class OutboxWorker:
 
         handler(payload)
 
+    def _finalize_event(self, future: Future[None], event: OutboxEvent) -> None:
+        """Persist a handler result only while this worker still owns the claim."""
+        event_id = event.id
+        claim_token = event.claim_token
+        if event_id is None or not claim_token:
+            logger.error("Event has no ID or claim token, skipping finalization")
+            return
+
+        try:
+            future.result()
+        except Exception as e:
+            logger.error("Error processing event {}: {}", event_id, e, exc_info=True)
+            try:
+                updated = self.repository.mark_retry(event_id, claim_token)
+            except Exception:
+                logger.exception("Failed to mark event {} for retry", event_id)
+                return
+            if not updated:
+                logger.warning("Ignored retry result for event {} because its claim was lost", event_id)
+            return
+
+        try:
+            updated = self.repository.mark_success(event_id, claim_token)
+        except Exception:
+            logger.exception("Failed to mark event {} as successful", event_id)
+            return
+        if updated:
+            logger.debug("Successfully processed event {}", event_id)
+        else:
+            logger.warning("Ignored success result for event {} because its claim was lost", event_id)
+
+    def _renew_claims(self, pending: Dict[Future[None], OutboxEvent]) -> None:
+        """Renew leases for handlers that are still running."""
+        for event in pending.values():
+            if event.id is None or not event.claim_token:
+                continue
+            try:
+                renewed = self.repository.renew_claim(event.id, event.claim_token)
+            except Exception:
+                logger.exception("Failed to renew claim for event {}", event.id)
+                continue
+            if not renewed:
+                logger.warning("Claim for event {} is no longer owned by this worker", event.id)
+
+    def _process_batch(self, batch: List[OutboxEvent]) -> None:
+        """Process a claimed batch and heartbeat leases until handlers finish."""
+        pending: Dict[Future[None], OutboxEvent] = {
+            self.executor.submit(self.process_event, event): event for event in batch
+        }
+        heartbeat_interval = max(0.1, self.repository.lease_seconds / 3)
+        next_heartbeat = time.monotonic() + heartbeat_interval
+
+        while pending:
+            timeout = max(0.0, next_heartbeat - time.monotonic())
+            completed, _ = wait(
+                pending,
+                timeout=timeout,
+                return_when=FIRST_COMPLETED,
+            )
+            for future in completed:
+                event = pending.pop(future)
+                self._finalize_event(future, event)
+
+            if pending and time.monotonic() >= next_heartbeat:
+                self._renew_claims(pending)
+                next_heartbeat = time.monotonic() + heartbeat_interval
+
     def run_loop(self) -> None:
         """Main processing loop that fetches and processes events."""
         logger.info("Worker started")
@@ -83,26 +150,4 @@ class OutboxWorker:
 
             logger.debug("Fetched {} events for processing", len(batch))
 
-            futures: Dict[Future[None], OutboxEvent] = {
-                self.executor.submit(self.process_event, evt): evt for evt in batch
-            }
-
-            for future in as_completed(futures):
-                event: OutboxEvent = futures[future]
-                event_id: Optional[int] = event.id
-
-                if event_id is None:
-                    logger.error("Event has no ID, skipping")
-                    continue
-
-                try:
-                    future.result()
-                    self.repository.mark_success(event_id)
-                    logger.debug("Successfully processed event {}", event_id)
-                # Catching generic Exception is intentional for security:
-                # - Prevents information leakage about specific failure types
-                # - Ensures all events are properly marked for retry
-                # - Protects against revealing internal implementation details
-                except Exception as e:
-                    logger.error("Error processing event {}: {}", event_id, e, exc_info=True)
-                    self.repository.mark_retry(event_id)
+            self._process_batch(batch)

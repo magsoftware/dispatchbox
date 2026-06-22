@@ -170,6 +170,7 @@ python -m dispatchbox.cli \
 - `--processes`: Number of worker processes (default: 1)
 - `--batch-size`: Events to fetch per batch (default: 10)
 - `--poll-interval`: Seconds to sleep when no work (default: 1.0)
+- `--lease-seconds`: Seconds before an unrenewed claim can be reclaimed (default: 300)
 - `--log-level`: Logging level - DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
 - `--http-host`: HTTP server host (default: 0.0.0.0)
 - `--http-port`: HTTP server port for health checks and metrics (default: 8080)
@@ -182,6 +183,7 @@ python -m dispatchbox.cli \
 - `connect_timeout`: Database connection timeout in seconds (default: 10)
 - `query_timeout`: Database query timeout in seconds (default: 30)
 - `max_parallel`: Maximum parallel threads per worker process (default: 10)
+- `lease_seconds`: Claim duration; active handlers renew it every one third of this interval (default: 300)
 - `http_host`: HTTP server host (default: 0.0.0.0)
 - `http_port`: HTTP server port (default: 8080)
 
@@ -304,7 +306,7 @@ flowchart LR
 1. **Multiple worker processes** are started, each with its own database connection
 2. Each worker process has a unique name (e.g., `worker-00-pid12345`) for logging identification
 3. Each process runs a **polling loop** that fetches pending/retry events
-4. Events are fetched using `FOR UPDATE SKIP LOCKED` to prevent conflicts
+4. Events are atomically claimed with `UPDATE ... RETURNING` and a unique claim token
 5. Each event is processed in a **separate thread** using ThreadPoolExecutor
 6. On success, events are marked as `done`
 7. On failure, events are marked as `retry` with updated `next_run_at` and incremented attempts
@@ -340,8 +342,8 @@ sequenceDiagram
     Note over DB,Outbox: Domain data and outbox event committed atomically
 
     loop Every poll_interval seconds
-        DBox->>Outbox: SELECT ... FOR UPDATE SKIP LOCKED WHERE status IN (pending, retry)
-        Note right of DBox: Fetch batch of events
+        DBox->>Outbox: UPDATE ... RETURNING using FOR UPDATE SKIP LOCKED
+        Note right of DBox: Set processing, claim_token and lease deadline atomically
     end
 
     DBox->>DBox: Deserialize event into model
@@ -349,13 +351,14 @@ sequenceDiagram
     activate H
 
     H->>Ext: HTTP call / publish to queue
+    DBox->>Outbox: Renew lease while the handler is running
     Ext-->>H: Response / acknowledgement
     deactivate H
 
-    DBox->>Outbox: UPDATE outbox SET status='done', ... WHERE id = event_id
+    DBox->>Outbox: UPDATE ... SET status='done' WHERE id = event_id AND claim_token = token
 
     alt Handler or integration error
-        DBox->>Outbox: UPDATE outbox SET status='retry', attempts=attempts+1, next_run_at = now() + backoff
+        DBox->>Outbox: UPDATE ... SET status='retry' WHERE id = event_id AND claim_token = token
         Note right of DBox: After max_attempts status='dead' (DLQ)
     end
 ```
@@ -379,10 +382,15 @@ sequenceDiagram
 
 - All database operations use **manual transaction control** (`autocommit = False`)
 - Each operation (fetch, mark_success, mark_retry) performs its own `COMMIT`
-- `FOR UPDATE SKIP LOCKED` ensures safe concurrent access:
+- Claiming uses `FOR UPDATE SKIP LOCKED` and `UPDATE ... RETURNING` in one transaction:
   - Multiple workers can fetch different events simultaneously
-  - Locked rows are skipped, preventing blocking between workers
+  - Locked rows are skipped, and committed rows remain unavailable until their lease expires
+  - A unique claim token prevents stale workers from overwriting a newer claim
   - This enables true parallel processing across processes
+
+**Delivery semantics:** Dispatchbox provides at-least-once delivery. The lease heartbeat avoids reclaiming normally
+running handlers, but a process can still crash after an external side effect and before the database is marked
+`done`. Handlers must therefore be idempotent and should send a stable deduplication key included in the event payload.
 
 **Query Timeouts:**
 

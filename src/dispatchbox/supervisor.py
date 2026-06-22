@@ -10,7 +10,7 @@ from typing import Any, List
 
 from loguru import logger
 
-from dispatchbox.config import DEFAULT_MAX_PARALLEL, DEFAULT_RETRY_BACKOFF_SECONDS
+from dispatchbox.config import DEFAULT_LEASE_SECONDS, DEFAULT_MAX_PARALLEL, DEFAULT_RETRY_BACKOFF_SECONDS
 from dispatchbox.repository import OutboxRepository
 from dispatchbox.worker import OutboxWorker
 
@@ -57,6 +57,7 @@ def worker_loop(
     worker_name: str,
     max_parallel: int = DEFAULT_MAX_PARALLEL,
     retry_backoff_seconds: int = DEFAULT_RETRY_BACKOFF_SECONDS,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
 ) -> None:
     """
     Worker process entry point.
@@ -69,11 +70,16 @@ def worker_loop(
         worker_name: Unique name for this worker (e.g., "worker-00")
         max_parallel: Maximum number of parallel threads
         retry_backoff_seconds: Seconds to wait before retrying failed events
+        lease_seconds: Seconds before an unrenewed claim can be reclaimed
     """
     full_worker_name = _setup_worker_logging(worker_name)
     _setup_worker_signal_handlers(stop_event, full_worker_name)
 
-    repository = OutboxRepository(dsn=dsn, retry_backoff_seconds=retry_backoff_seconds)
+    repository = OutboxRepository(
+        dsn=dsn,
+        retry_backoff_seconds=retry_backoff_seconds,
+        lease_seconds=lease_seconds,
+    )
 
     worker = OutboxWorker(
         batch_size=batch_size,
@@ -115,6 +121,7 @@ def _start_worker_processes(
     poll_interval: float,
     max_parallel: int,
     retry_backoff_seconds: int,
+    lease_seconds: int,
 ) -> List[Process]:
     """
     Start all worker processes.
@@ -127,6 +134,7 @@ def _start_worker_processes(
         poll_interval: Seconds to sleep when no work available
         max_parallel: Maximum number of parallel threads per process
         retry_backoff_seconds: Seconds to wait before retrying failed events
+        lease_seconds: Seconds before an unrenewed claim can be reclaimed
 
     Returns:
         List of started Process objects
@@ -137,7 +145,16 @@ def _start_worker_processes(
         worker_name = f"worker-{i:02d}"
         p: Process = Process(
             target=worker_loop,
-            args=(dsn, stop_event, batch_size, poll_interval, worker_name, max_parallel, retry_backoff_seconds),
+            args=(
+                dsn,
+                stop_event,
+                batch_size,
+                poll_interval,
+                worker_name,
+                max_parallel,
+                retry_backoff_seconds,
+                lease_seconds,
+            ),
             name=f"dispatchbox-worker-{i:02d}",
         )
         p.start()
@@ -176,6 +193,7 @@ def start_processes(
     poll_interval: float,
     max_parallel: int = DEFAULT_MAX_PARALLEL,
     retry_backoff_seconds: int = DEFAULT_RETRY_BACKOFF_SECONDS,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
 ) -> None:
     """
     Start and supervise multiple worker processes.
@@ -187,6 +205,7 @@ def start_processes(
         poll_interval: Seconds to sleep when no work available
         max_parallel: Maximum number of parallel threads per process
         retry_backoff_seconds: Seconds to wait before retrying failed events
+        lease_seconds: Seconds before an unrenewed claim can be reclaimed
     """
     stop_event: Event = Event()
     children = _start_worker_processes(
@@ -197,6 +216,7 @@ def start_processes(
         poll_interval,
         max_parallel,
         retry_backoff_seconds,
+        lease_seconds,
     )
 
     _setup_signal_handlers(stop_event, children)

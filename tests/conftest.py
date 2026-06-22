@@ -28,7 +28,9 @@ def sample_event_dict() -> Dict[str, Any]:
 @pytest.fixture
 def sample_event(sample_event_dict: Dict[str, Any]) -> OutboxEvent:
     """Sample OutboxEvent instance for testing."""
-    return OutboxEvent.from_dict(sample_event_dict)
+    event = OutboxEvent.from_dict(sample_event_dict)
+    event.claim_token = "claim-token"
+    return event
 
 
 @pytest.fixture
@@ -85,11 +87,13 @@ def mock_repository(mocker):
 
     mock_repo = mocker.Mock(spec=OutboxRepository)
     mock_repo.fetch_pending.return_value = []
-    mock_repo.mark_success = mocker.Mock()
-    mock_repo.mark_retry = mocker.Mock()
+    mock_repo.mark_success = mocker.Mock(return_value=True)
+    mock_repo.mark_retry = mocker.Mock(return_value=True)
+    mock_repo.renew_claim = mocker.Mock(return_value=True)
     mock_repo.close = mocker.Mock()
     mock_repo.__enter__ = Mock(return_value=mock_repo)
     mock_repo.__exit__ = Mock(return_value=None)
     mock_repo.dsn = "host=localhost dbname=test"
     mock_repo.retry_backoff = 30
+    mock_repo.lease_seconds = 300
     return mock_repo

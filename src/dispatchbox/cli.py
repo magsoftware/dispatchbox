@@ -12,6 +12,7 @@ from dispatchbox.config import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_HTTP_HOST,
     DEFAULT_HTTP_PORT,
+    DEFAULT_LEASE_SECONDS,
     DEFAULT_LOG_LEVEL,
     DEFAULT_NUM_PROCESSES,
     DEFAULT_POLL_INTERVAL,
@@ -50,6 +51,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_POLL_INTERVAL,
         help=f"Seconds to sleep when no work (default: {DEFAULT_POLL_INTERVAL})",
+    )
+    parser.add_argument(
+        "--lease-seconds",
+        type=int,
+        default=DEFAULT_LEASE_SECONDS,
+        help=f"Seconds before an unrenewed claim can be reclaimed (default: {DEFAULT_LEASE_SECONDS})",
     )
     parser.add_argument(
         "--log-level",
@@ -203,10 +210,11 @@ def main() -> None:
     setup_logging(args.log_level)
 
     logger.info(
-        "Starting dispatchbox supervisor: processes={} batch_size={} poll_interval={}",
+        "Starting dispatchbox supervisor: processes={} batch_size={} poll_interval={} lease_seconds={}",
         args.processes,
         args.batch_size,
         args.poll_interval,
+        args.lease_seconds,
     )
 
     http_server = setup_http_server(args)
@@ -217,6 +225,7 @@ def main() -> None:
             args.processes,
             args.batch_size,
             args.poll_interval,
+            lease_seconds=args.lease_seconds,
         )
     finally:
         if http_server:

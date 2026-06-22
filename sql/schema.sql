@@ -5,16 +5,17 @@ CREATE TABLE outbox_event (
   aggregate_id   TEXT        NOT NULL,   -- '12345'
   event_type     TEXT        NOT NULL,   -- 'order.created'
   payload        JSONB       NOT NULL,   -- everything consumers need
-  status         TEXT        NOT NULL DEFAULT 'pending',  -- pending | retry | done | dead
+  status         TEXT        NOT NULL DEFAULT 'pending',  -- pending | retry | processing | done | dead
+  claim_token    TEXT,
   attempts       INT         NOT NULL DEFAULT 0,
   next_run_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- OPTYMALNY INDEKS DLA WORKERÓW
+-- OPTYMALNY INDEKS DLA WORKERÓW (obejmuje pending, retry i processing dla reclaimu)
 CREATE INDEX idx_outbox_due
   ON outbox_event (next_run_at ASC)
-  WHERE status IN ('pending','retry');
+  WHERE status IN ('pending','retry','processing');
 
 -- TABELA ARCHIWALNA
 CREATE TABLE outbox_event_archive (
