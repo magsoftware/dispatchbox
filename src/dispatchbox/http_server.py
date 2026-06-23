@@ -227,14 +227,13 @@ class HttpServer:
 
         try:
             params = self._parse_list_dead_events_params()
-            repo = self.repository_fn()
-
-            events = repo.fetch_dead_events(
-                limit=params["limit"],
-                offset=params["offset"],
-                aggregate_type=params["aggregate_type"],
-                event_type=params["event_type"],
-            )
+            with self.repository_fn() as repo:
+                events = repo.fetch_dead_events(
+                    limit=params["limit"],
+                    offset=params["offset"],
+                    aggregate_type=params["aggregate_type"],
+                    event_type=params["event_type"],
+                )
 
             return {
                 "events": [event.to_dict() for event in events],
@@ -283,12 +282,11 @@ class HttpServer:
 
         try:
             params = self._parse_stats_params()
-            repo = self.repository_fn()
-
-            total = repo.count_dead_events(
-                aggregate_type=params["aggregate_type"],
-                event_type=params["event_type"],
-            )
+            with self.repository_fn() as repo:
+                total = repo.count_dead_events(
+                    aggregate_type=params["aggregate_type"],
+                    event_type=params["event_type"],
+                )
 
             return {
                 "total": total,
@@ -319,8 +317,8 @@ class HttpServer:
             return {"error": "Repository not available"}
 
         try:
-            repo = self.repository_fn()
-            event = repo.get_dead_event(event_id)
+            with self.repository_fn() as repo:
+                event = repo.get_dead_event(event_id)
 
             if event:
                 return event.to_dict()
@@ -354,8 +352,8 @@ class HttpServer:
             return {"error": "Repository not available"}
 
         try:
-            repo = self.repository_fn()
-            success = repo.retry_dead_event(event_id)
+            with self.repository_fn() as repo:
+                success = repo.retry_dead_event(event_id)
 
             if success:
                 return {"status": "success", "message": f"Event {event_id} reset to pending", "event_id": event_id}
@@ -429,8 +427,8 @@ class HttpServer:
             event_ids = data.get("event_ids", [])
             self._validate_event_ids(event_ids)
 
-            repo = self.repository_fn()
-            count = repo.retry_dead_events_batch(event_ids)
+            with self.repository_fn() as repo:
+                count = repo.retry_dead_events_batch(event_ids)
 
             return {
                 "status": "success",

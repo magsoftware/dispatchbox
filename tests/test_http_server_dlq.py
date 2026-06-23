@@ -18,6 +18,7 @@ from dispatchbox.repository import OutboxRepository
 def mock_repository():
     """Mock OutboxRepository."""
     mock_repo = MagicMock(spec=OutboxRepository)
+    mock_repo.__enter__.return_value = mock_repo
     return mock_repo
 
 
@@ -80,6 +81,8 @@ def test_list_dead_events(http_server_with_repo, sample_dead_event):
             aggregate_type=None,
             event_type=None,
         )
+        mock_repo.__enter__.assert_called_once_with()
+        mock_repo.__exit__.assert_called_once_with(None, None, None)
 
 
 def test_list_dead_events_with_filters(http_server_with_repo, sample_dead_event):
@@ -165,6 +168,8 @@ def test_dead_events_stats(http_server_with_repo):
             aggregate_type=None,
             event_type=None,
         )
+        mock_repo.__enter__.assert_called_once_with()
+        mock_repo.__exit__.assert_called_once_with(None, None, None)
 
 
 def test_dead_events_stats_no_repository():
@@ -203,6 +208,8 @@ def test_get_dead_event(http_server_with_repo, sample_dead_event):
     assert result["id"] == 1
     assert result["status"] == "dead"
     mock_repo.get_dead_event.assert_called_once_with(1)
+    mock_repo.__enter__.assert_called_once_with()
+    mock_repo.__exit__.assert_called_once_with(None, None, None)
 
 
 def test_get_dead_event_not_found(http_server_with_repo):
@@ -248,6 +255,8 @@ def test_retry_dead_event(http_server_with_repo):
     assert result["event_id"] == 123
     assert "reset to pending" in result["message"]
     mock_repo.retry_dead_event.assert_called_once_with(123)
+    mock_repo.__enter__.assert_called_once_with()
+    mock_repo.__exit__.assert_called_once_with(None, None, None)
 
 
 def test_retry_dead_event_not_found(http_server_with_repo):
@@ -298,6 +307,8 @@ def test_retry_dead_events_batch(http_server_with_repo):
         assert result["processed"] == 3
         assert "reset to pending" in result["message"]
         mock_repo.retry_dead_events_batch.assert_called_once_with([1, 2, 3])
+        mock_repo.__enter__.assert_called_once_with()
+        mock_repo.__exit__.assert_called_once_with(None, None, None)
 
 
 def test_retry_dead_events_batch_invalid_json(http_server_with_repo):

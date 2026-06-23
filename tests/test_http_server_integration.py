@@ -28,6 +28,7 @@ def find_free_port():
 def mock_repository():
     """Mock OutboxRepository."""
     mock_repo = MagicMock(spec=OutboxRepository)
+    mock_repo.__enter__.return_value = mock_repo
     return mock_repo
 
 
