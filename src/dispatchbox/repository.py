@@ -175,7 +175,10 @@ class OutboxRepository:
             DSN with connect_timeout parameter added if needed
         """
         if "connect_timeout" not in dsn:
-            separator = "&" if "?" in dsn else " "
+            if dsn.startswith(("postgresql://", "postgres://")):
+                separator = "&" if "?" in dsn else "?"
+            else:
+                separator = " "
             return f"{dsn}{separator}connect_timeout={timeout}"
         return dsn
 

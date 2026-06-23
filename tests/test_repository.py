@@ -316,7 +316,28 @@ def test_repository_add_connect_timeout_to_dsn_without_timeout(mock_db_connectio
     """Test _add_connect_timeout_to_dsn adds timeout when not present."""
     repo = OutboxRepository("host=localhost dbname=test")
     result = repo._add_connect_timeout_to_dsn("host=localhost dbname=test", 10)
-    assert "connect_timeout=10" in result
+    assert result == "host=localhost dbname=test connect_timeout=10"
+
+
+@pytest.mark.parametrize("scheme", ["postgresql", "postgres"])
+def test_repository_add_connect_timeout_to_uri_without_query(mock_db_connection, scheme):
+    """Test _add_connect_timeout_to_dsn starts a query string for URI DSNs."""
+    repo = OutboxRepository("host=localhost dbname=test")
+    dsn = f"{scheme}://user:password@localhost/test"
+
+    result = repo._add_connect_timeout_to_dsn(dsn, 10)
+
+    assert result == f"{dsn}?connect_timeout=10"
+
+
+def test_repository_add_connect_timeout_to_uri_with_query(mock_db_connection):
+    """Test _add_connect_timeout_to_dsn appends to an existing URI query string."""
+    repo = OutboxRepository("host=localhost dbname=test")
+    dsn = "postgresql://user:password@localhost/test?sslmode=require"
+
+    result = repo._add_connect_timeout_to_dsn(dsn, 10)
+
+    assert result == f"{dsn}&connect_timeout=10"
 
 
 def test_repository_add_connect_timeout_to_dsn_with_existing_timeout(mock_db_connection):
