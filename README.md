@@ -266,11 +266,9 @@ outbox/
 │   ├── schema.sql            # Main schema with archive table and function
 │   └── insert.sql            # Sample data for testing
 ├── docs/                      # Documentation
-│   ├── BOTTLE_DECORATORS_EXPLANATION.md  # Bottle decorators design decision
-│   ├── DEAD_LETTER_QUEUE.md   # Dead Letter Queue documentation
-│   ├── HTTP_FRAMEWORK_ANALYSIS.md  # HTTP framework analysis
-│   ├── IMPROVEMENTS.md        # Improvement proposals
-│   └── SQL_QUERY_BUILDER_ANALYSIS.md  # SQL query builder analysis
+│   ├── adr/                   # Accepted architecture decisions
+│   ├── ARCHITECTURE.md        # Current system architecture
+│   └── ROADMAP.md             # Verified, still-open improvements
 ├── pyproject.toml             # Project configuration
 ├── uv.lock                    # Dependency lock file
 └── README.md                  # This file
@@ -326,7 +324,7 @@ flowchart LR
 6. On success, events are marked as `done`
 7. On failure, events are marked as `retry` with updated `next_run_at` and incremented attempts
 8. After `max_attempts` (default: 5), events are marked as `dead` and moved to Dead Letter Queue
-9. Dead events are logged with warnings and can be reviewed/manually retried (see [Dead Letter Queue docs](docs/DEAD_LETTER_QUEUE.md))
+9. Dead events are logged with warnings and can be reviewed or manually retried through the DLQ HTTP API
 
 ### End-to-End Sequence From Client To Dispatchbox
 
@@ -457,7 +455,7 @@ Events that exceed the maximum retry attempts are marked as `dead` and stored in
 - Analyze failure patterns
 - Manually retry after fixing underlying issues
 
-See [Dead Letter Queue documentation](docs/DEAD_LETTER_QUEUE.md) for details on current implementation and future enhancements.
+See the [architecture documentation](docs/ARCHITECTURE.md#dead-letter-queue-dlq) for the current DLQ endpoints.
 
 ## Event Archiving
 
