@@ -239,6 +239,7 @@ class OutboxRepository:
 
         self.dsn: str = dsn.strip()
         self.retry_backoff: int = retry_backoff_seconds
+        self.connect_timeout: int = connect_timeout
         self.query_timeout: int = query_timeout
         self.max_attempts: int = max_attempts
         self.lease_seconds: int = lease_seconds
@@ -311,8 +312,7 @@ class OutboxRepository:
             pass
 
         try:
-            # Reconnect with same timeout settings (default 10s for reconnect)
-            dsn_with_timeout = self._add_connect_timeout_to_dsn(self.dsn, 10)
+            dsn_with_timeout = self._add_connect_timeout_to_dsn(self.dsn, self.connect_timeout)
             self.conn = self._establish_connection(dsn_with_timeout)
             logger.info("Database connection restored")
         except psycopg2.OperationalError as e:

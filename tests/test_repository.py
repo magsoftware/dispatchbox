@@ -375,8 +375,8 @@ def test_repository_reconnect_success(mock_db_connection, mock_cursor):
     mock_conn2.cursor.return_value.__enter__ = Mock(return_value=mock_cursor)
     mock_conn2.cursor.return_value.__exit__ = Mock(return_value=None)
 
-    with patch("psycopg2.connect", side_effect=[mock_conn1, mock_conn2]):
-        repo = OutboxRepository("host=localhost dbname=test")
+    with patch("psycopg2.connect", side_effect=[mock_conn1, mock_conn2]) as mock_connect:
+        repo = OutboxRepository("host=localhost dbname=test", connect_timeout=3)
         repo.conn = mock_conn1
 
         # Simulate connection loss
@@ -385,6 +385,11 @@ def test_repository_reconnect_success(mock_db_connection, mock_cursor):
         # Reconnect should succeed
         repo._reconnect()
         assert repo.conn == mock_conn2
+        assert repo.connect_timeout == 3
+        assert [entry.args[0] for entry in mock_connect.call_args_list] == [
+            "host=localhost dbname=test connect_timeout=3",
+            "host=localhost dbname=test connect_timeout=3",
+        ]
 
 
 def test_repository_reconnect_raises_on_failure(mock_db_connection):
